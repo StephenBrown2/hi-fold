@@ -40,27 +40,39 @@ func calculateHIFO(transactions []Transaction, priceAPI PriceAPI, targetYear int
 					Remaining:    tx.AmountBTC,
 				}
 
-				// For deposits or transactions without price, fetch historical price
-				if (tx.TransactionType == "Deposit" && tx.PricePerCoin.IsZero()) || tx.PricePerCoin.IsZero() {
-					if price, err := priceAPI.GetBTCPriceUSD(tx.Date); err != nil {
-						fmt.Printf("Warning: Could not fetch price for %s, using zero cost basis: %v\n",
-							tx.Date.Format("2006-01-02"), err)
-						lot.CostBasisUSD = money.New(0, money.USD)
-						lot.PricePerCoin = money.New(0, money.USD)
-					} else {
-						lot.PricePerCoin = money.NewFromFloat(price, money.USD)
-						if tx.TransactionType == "Deposit" || tx.TotalUSD.IsZero() {
-							// For deposits or purchases without price data, use the market price as cost basis
-							// Get BTC amount as int64 to avoid float precision issues
-							btcAmount := tx.AmountBTC.Amount()
-							// Calculate cost basis: price * BTC amount (converting units appropriately)
-							costBasisCents := int64(price*100) * btcAmount / 100000000 // Convert from satoshis to USD cents
-							lot.CostBasisUSD = money.New(costBasisCents, money.USD)
-						}
-						fmt.Printf("Fetched historical price for %s on %s: $%.2f\n",
-							tx.TransactionType, tx.Date.Local().Format(time.RFC1123), price)
-					}
+				// Skip price fetching if we already have a price
+				if !tx.PricePerCoin.IsZero() {
+					lots = append(lots, lot)
+					continue
 				}
+
+				// Fetch historical price for transactions without price
+				price, err := priceAPI.GetBTCPriceUSD(tx.Date)
+				if err != nil {
+					// Handle API failure case
+					fmt.Printf("Warning: Could not fetch price for %s, using zero cost basis: %v\n",
+						tx.Date.Format("2006-01-02"), err)
+					lot.CostBasisUSD = money.New(0, money.USD)
+					lot.PricePerCoin = money.New(0, money.USD)
+					lots = append(lots, lot)
+					continue
+				}
+
+				// Handle API success case - set the fetched price
+				lot.PricePerCoin = money.NewFromFloat(price, money.USD)
+
+				// Calculate cost basis from market price if needed
+				if tx.TotalUSD.IsZero() {
+					// For deposits or purchases without price data, use the market price as cost basis
+					// Get BTC amount as int64 to avoid float precision issues
+					btcAmount := tx.AmountBTC.Amount()
+					// Calculate cost basis: price * BTC amount (converting units appropriately)
+					costBasisCents := int64(price*100) * btcAmount / 100000000 // Convert from satoshis to USD cents
+					lot.CostBasisUSD = money.New(costBasisCents, money.USD)
+				}
+
+				fmt.Printf("Fetched historical price for %s on %s: $%.2f\n",
+					tx.TransactionType, tx.Date.Local().Format(time.RFC1123), price)
 
 				lots = append(lots, lot)
 			}
