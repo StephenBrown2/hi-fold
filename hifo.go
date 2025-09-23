@@ -31,7 +31,7 @@ func calculateHIFO(transactions []Transaction, priceAPI PriceAPI, targetYear int
 		switch tx.TransactionType {
 		case "Purchase", "Deposit":
 			// Only add lots that were acquired by the target year or earlier
-			if tx.AmountBTC.IsPositive() && tx.Date.Year() <= targetYear {
+			if tx.Date.Year() <= targetYear {
 				lot := Lot{
 					Date:         tx.Date,
 					AmountBTC:    tx.AmountBTC,
@@ -79,19 +79,15 @@ func calculateHIFO(transactions []Transaction, priceAPI PriceAPI, targetYear int
 
 		case "Sale":
 			// Process all sales to correctly track remaining holdings
-			if tx.AmountBTC.IsNegative() {
-				sale := processSale(tx.AmountBTC.Absolute(), tx.TotalUSD, tx.Date, &lots)
-				// Only include sales from the target year in the returned sales slice for display
-				if tx.Date.Year() == targetYear {
-					sales = append(sales, sale)
-				}
+			sale := processSale(tx.AmountBTC.Absolute(), tx.TotalUSD, tx.Date, &lots)
+			// Only include sales from the target year in the returned sales slice for display
+			if tx.Date.Year() == targetYear {
+				sales = append(sales, sale)
 			}
 
 		case "Withdrawal":
 			// Process withdrawals to reduce remaining holdings (but don't create taxable sale records)
-			if tx.AmountBTC.IsNegative() {
-				processWithdrawal(tx.AmountBTC.Absolute(), tx.Date, &lots)
-			}
+			processWithdrawal(tx.AmountBTC.Absolute(), tx.Date, &lots)
 		}
 	}
 
