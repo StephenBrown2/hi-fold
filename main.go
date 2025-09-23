@@ -9,8 +9,6 @@ import (
 
 	"github.com/Rhymond/go-money"
 	"github.com/charmbracelet/fang"
-	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/lipgloss/v2/table"
 	"github.com/spf13/cobra"
 )
 
@@ -94,35 +92,11 @@ func runHIFO(cmd *cobra.Command, args []string) {
 }
 
 func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year int, priceAPI PriceAPI) {
-	// Create styles
-	headerStyle := lipgloss.NewStyle().
-		AlignHorizontal(lipgloss.Center).
-		Bold(true).
-		Foreground(lipgloss.Color("#7D56F4"))
-
-	titleStyle := headerStyle.Padding(1)
-
 	fmt.Println(titleStyle.Render(fmt.Sprintf("Bitcoin HIFO Cost Basis Report - %d", year)))
 
 	// Summary table
-	summaryTable := table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			style := lipgloss.NewStyle()
-
-			// Header row styling
-			if row == table.HeaderRow {
-				return headerStyle
-			}
-
-			// Right-align the Value column (column 1)
-			if col == 1 {
-				style = style.AlignHorizontal(lipgloss.Right)
-			}
-
-			return style.Foreground(lipgloss.Color("252"))
-		}).
+	summaryTable := newTable().
+		StyleFunc(summaryTableStyleFunc()).
 		Headers("Metric", "Value")
 
 	totalProceeds := money.New(0, money.USD)
@@ -139,41 +113,15 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 	summaryTable.Row("Total Sales", fmt.Sprintf("%d", totalSales))
 	summaryTable.Row("Total Proceeds", totalProceeds.Display())
 	summaryTable.Row("Total Cost Basis", totalCostBasis.Display())
-	summaryTable.Row("Total Gain/Loss", totalGainLoss.Display())
+	summaryTable.Row("Total Gain/Loss", displayRedGreen(totalGainLoss))
 
 	fmt.Println(summaryTable.Render())
 	fmt.Println()
 
 	// Sales detail table
 	if len(sales) > 0 {
-		salesTable := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
-			StyleFunc(func(row, col int) lipgloss.Style {
-				style := lipgloss.NewStyle()
-
-				// Header row styling
-				if row == table.HeaderRow {
-					return headerStyle
-				}
-
-				// Align monetary columns to the right (all columns except Date)
-				if col > 0 {
-					style = style.AlignHorizontal(lipgloss.Right)
-				}
-
-				// Color code gain/loss column while preserving alignment
-				if col == 5 {
-					value := sales[row].GainLossUSD
-					if value.IsPositive() {
-						return style.Foreground(lipgloss.Color("46")) // Green for gains
-					} else if value.IsNegative() {
-						return style.Foreground(lipgloss.Color("196")) // Red for losses
-					}
-				}
-
-				return style.Foreground(lipgloss.Color("252"))
-			}).
+		salesTable := newTable().
+			StyleFunc(monetaryTableStyleFunc()).
 			Headers("Date Sold", "Amount (BTC)", "Proceeds ($)", "Cost Basis ($)", "Price/BTC", "Gain/Loss ($)")
 
 		for _, sale := range sales {
@@ -190,7 +138,7 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 				sale.ProceedsUSD.Display(),
 				sale.CostBasisUSD.Display(),
 				avgPrice.Display(),
-				sale.GainLossUSD.Display(),
+				displayRedGreen(sale.GainLossUSD),
 			)
 		}
 
@@ -210,24 +158,8 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 		fmt.Println()
 		fmt.Println(titleStyle.Render("Remaining Holdings"))
 
-		lotsTable := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
-			StyleFunc(func(row, col int) lipgloss.Style {
-				style := lipgloss.NewStyle()
-
-				// Header row styling
-				if row == table.HeaderRow {
-					return headerStyle
-				}
-
-				// Align monetary columns to the right (all columns except Date)
-				if col > 0 {
-					style = style.AlignHorizontal(lipgloss.Right)
-				}
-
-				return style.Foreground(lipgloss.Color("252"))
-			}).
+		lotsTable := newTable().
+			StyleFunc(monetaryTableStyleFunc()).
 			Headers("Date Acquired", "Amount (BTC)", "Cost Basis ($)", "Price/BTC")
 
 		for _, lot := range remainingLots {
@@ -274,24 +206,8 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 		fmt.Println()
 
 		// Holdings summary table
-		summaryTable := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
-			StyleFunc(func(row, col int) lipgloss.Style {
-				style := lipgloss.NewStyle()
-
-				// Header row styling
-				if row == table.HeaderRow {
-					return headerStyle
-				}
-
-				// Right-align the Value column (column 1)
-				if col == 1 {
-					style = style.AlignHorizontal(lipgloss.Right)
-				}
-
-				return style.Foreground(lipgloss.Color("252"))
-			}).
+		summaryTable := newTable().
+			StyleFunc(summaryTableStyleFunc()).
 			Headers("Holdings Summary", "Value")
 
 		summaryTable.Row("Net BTC Position", totalRemainingBTC.Display())
@@ -325,7 +241,7 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 
 				// Use Money.Subtract() for subtraction operations
 				unrealizedGainLoss, _ := currentValue.Subtract(totalCostBasisRemaining)
-				summaryTable.Row("Unrealized Gain/Loss", unrealizedGainLoss.Display())
+				summaryTable.Row("Unrealized Gain/Loss", displayRedGreen(unrealizedGainLoss))
 			}
 		}
 
