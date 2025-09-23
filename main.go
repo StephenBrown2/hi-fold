@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Rhymond/go-money"
@@ -37,6 +38,31 @@ func init() {
 	rootCmd.Flags().BoolVarP(&useMockPrices, "mock-prices", "m", false, "Use mock prices instead of API for testing")
 }
 
+// expandGlobPatterns expands glob patterns in file paths and returns actual file paths
+func expandGlobPatterns(patterns []string) ([]string, error) {
+	var expandedFiles []string
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob pattern '%s': %v", pattern, err)
+		}
+
+		if len(matches) == 0 {
+			// If no matches found, check if it's a literal file that doesn't exist
+			if _, err := os.Stat(pattern); os.IsNotExist(err) {
+				return nil, fmt.Errorf("no files match pattern or file does not exist: %s", pattern)
+			}
+			// If it's a literal file that exists, add it
+			expandedFiles = append(expandedFiles, pattern)
+		} else {
+			expandedFiles = append(expandedFiles, matches...)
+		}
+	}
+
+	return expandedFiles, nil
+}
+
 func main() {
 	if err := fang.Execute(context.Background(), rootCmd, fang.WithoutVersion()); err != nil {
 		log.Fatal(err)
@@ -52,8 +78,18 @@ func runHIFO(cmd *cobra.Command, args []string) {
 		outputFile = fmt.Sprintf("tax-records-%d.csv", targetYear)
 	}
 
-	// Check that all input files exist
-	for _, file := range inputFiles {
+	// Expand glob patterns to actual file paths
+	expandedFiles, err := expandGlobPatterns(inputFiles)
+	if err != nil {
+		log.Fatalf("Error expanding file patterns: %v", err)
+	}
+
+	if len(expandedFiles) == 0 {
+		log.Fatal("Error: No files found matching the specified patterns")
+	}
+
+	// Check that all expanded files exist and are readable
+	for _, file := range expandedFiles {
 		if _, err := os.Stat(file); os.IsNotExist(err) {
 			log.Fatalf("Error: Input file does not exist: %s", file)
 		}
@@ -70,12 +106,12 @@ func runHIFO(cmd *cobra.Command, args []string) {
 	}
 
 	// Parse and merge CSV files
-	transactions, err := parseAndMergeCSVs(inputFiles)
+	transactions, err := parseAndMergeCSVs(expandedFiles)
 	if err != nil {
 		log.Fatalf("Error parsing CSV files: %v", err)
 	}
 
-	fmt.Printf("Loaded %d unique transactions from %d file(s)\n", len(transactions), len(inputFiles))
+	fmt.Printf("Loaded %d unique transactions from %d file(s)\n", len(transactions), len(expandedFiles))
 
 	// Calculate HIFO cost basis with all transactions (for proper remaining holdings calculation)
 	lots, sales := calculateHIFO(transactions, priceAPI, targetYear)

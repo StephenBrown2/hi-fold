@@ -75,12 +75,19 @@ The program supports processing multiple CSV files simultaneously with automatic
 # Process multiple files with comma-separated syntax
 ./hi-fold --year 2025 --input jan-2025.csv,feb-2025.csv,mar-2025.csv
 
+# Use glob patterns to match multiple files automatically
+./hi-fold --year 2025 --input "fold-*.csv"
+
+# More specific glob patterns
+./hi-fold --year 2025 --input "fold-*-202[45].csv"
+
 # Example with complete history for accurate HIFO calculations
 ./hi-fold --year 2025 --input fold-2022.csv,fold-2023.csv,fold-2024.csv,fold-2025.csv
 ```
 
 #### File Processing Features
 
+- **Glob pattern support**: Use wildcards like `*.csv` or `fold-*-20*.csv` to match multiple files automatically
 - **Automatic deduplication**: Transactions with duplicate Reference IDs are detected and skipped
 - **Chronological sorting**: All transactions are sorted by date after merging
 - **File validation**: Each input file is checked for existence before processing
@@ -190,7 +197,10 @@ This section shows a complete example of processing multiple files and the resul
 ### Command Example
 
 ```bash
-# Process complete transaction history for accurate HIFO calculations
+# Process complete transaction history for accurate HIFO calculations using glob patterns
+./hi-fold --year 2025 --input "fold-*.csv"
+
+# Alternative: specify files explicitly
 ./hi-fold --year 2025 --input fold-2024.csv,fold-2025.csv
 ```
 
