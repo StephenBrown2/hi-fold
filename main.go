@@ -220,7 +220,7 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 			avgCostBasisFloat := totalCostFloat / totalBTCFloat
 			avgCostBasis := money.NewFromFloat(avgCostBasisFloat, money.USD)
 
-			summaryTable.Row("Average Cost Basis", avgCostBasis.Display())
+			summaryTable.Row("Average BTC Price", avgCostBasis.Display())
 			summaryTable.Row("Total Cost Basis", totalCostBasisRemaining.Display())
 
 			// Get current price
@@ -239,7 +239,6 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 				summaryTable.Row("Current BTC Price", money.NewFromFloat(currentPrice, money.USD).Display())
 				summaryTable.Row("Current Value", currentValue.Display())
 
-				// Use Money.Subtract() for subtraction operations
 				unrealizedGainLoss, _ := currentValue.Subtract(totalCostBasisRemaining)
 				summaryTable.Row("Unrealized Gain/Loss", displayRedGreen(unrealizedGainLoss))
 			}
