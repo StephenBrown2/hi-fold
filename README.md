@@ -15,10 +15,11 @@ Even if you're only generating a tax report for 2025, include transaction files 
 
 ## Features
 
-- **HIFO Cost Basis Calculation**: Uses the tax-optimized HIFO method to minimize capital gains
+- **Tax-Optimized HIFO Algorithm**: Prioritizes long-term capital gains (>1 year) then highest-cost lots to minimize tax liability
+- **Short-Term vs Long-Term Separation**: Automatically categorizes and reports gains separately per IRS requirements
 - **Multi-Year Processing**: Processes all historical transactions but reports on specific tax years
-- **Beautiful Terminal Display**: Uses Charm Bracelet's lipgloss for formatted tables with color-coded gains/losses
-- **IRS-Compliant Output**: Generates CSV files suitable for tax return preparation (Form 8949)
+- **Form 8949 Compliant Output**: Generates properly structured CSV files for direct IRS tax form preparation
+- **Beautiful Terminal Display**: Separate tables for short-term and long-term sales with color-coded gains/losses
 - **Historical Price Integration**: Automatically fetches missing Bitcoin prices from mempool.space API
 - **Modular Architecture**: Clean separation of concerns with dedicated modules for parsing, calculations, and display
 - **Precise Monetary Calculations**: Uses go-money library for exact decimal arithmetic avoiding floating-point errors
@@ -107,24 +108,30 @@ The program expects CSV files exported from Fold with the following format:
 
 ## Output Formats
 
-The program generates two types of output:
+The program generates two types of output with proper short-term vs long-term capital gains separation:
 
 ### Terminal Display
 
-- **Summary Table**: Total sales, proceeds, cost basis, and gain/loss for the target year
-- **Sales Details**: Aggregated view showing one row per sale transaction with total amounts
+- **Overall Summary Table**: Total sales, proceeds, cost basis, and gain/loss for the target year
+- **Short-Term Sales Details**: Separate table for sales of Bitcoin held ≤1 year with totals
+- **Long-Term Sales Details**: Separate table for sales of Bitcoin held >1 year with totals  
 - **Holdings Details**: Current Bitcoin holdings with acquisition dates and cost basis
 - **Holdings Summary**: Net position, average price, and unrealized gains/losses
 
 ### CSV Output (tax-records-{year}.csv)
 
-The CSV file breaks down each sale into **individual tax lots** for IRS Form 8949 compliance:
+The CSV file is structured for direct IRS Form 8949 compliance with proper separation:
 
-- **Multiple rows per sale**: Each sale transaction generates multiple CSV rows (one per tax lot used)
-- **Lot-by-lot breakdown**: Shows exactly which acquisition lots were sold and their individual gains/losses
-- **HIFO ordering**: Reflects the highest-cost lots being sold first
+- **Short-Term Section**: "Form 8949 Part I" transactions with summary totals
+- **Long-Term Section**: "Form 8949 Part II" transactions with summary totals
+- **Individual Tax Lots**: Each sale broken down by the specific lots used (HIFO prioritized)
+- **Holding Period Compliance**: Automatically categorizes based on >1 year vs ≤1 year holding periods
 
-**CSV Columns**: Description, Date Acquired, Date Sold, Proceeds, Cost Basis, Gain/Loss
+**CSV Structure**:
+
+- Section headers for short-term and long-term capital gains
+- Individual lot records: Description, Date Acquired, Date Sold, Proceeds, Cost Basis, Gain/Loss
+- Summary totals for each section
 
 ## Understanding Holdings Metrics
 
@@ -165,18 +172,25 @@ This represents the Bitcoin amounts that are still available for **tax lot track
 
 ## HIFO Algorithm
 
-The program implements the Optimized HIFO (Highest In, First Out) method - a tax optimization strategy that sells the highest-cost Bitcoin lots first to minimize capital gains.
+The program implements the Optimized HIFO (Highest In, First Out) method - a tax optimization strategy that prioritizes long-term capital gains and sells the highest-cost Bitcoin lots first to minimize overall tax liability.
+
+### Tax-Optimized Lot Selection Priority
+
+1. **Long-Term HIFO First**: Prioritizes selling lots held for more than 1 year (long-term capital gains rates)
+2. **Short-Term HIFO Second**: Within each category, sells highest-cost lots first
+3. **Holding Period Calculation**: Uses the exact date difference to determine short-term (≤1 year) vs long-term (>1 year)
 
 ### How It Works
 
 1. **Multi-Year Processing**: Processes ALL transactions chronologically to build complete lot inventory
 2. **Lot Creation**: Each purchase/deposit creates a tax lot with acquisition date, amount, and cost basis
-3. **HIFO Sales Matching**: When selling, matches against lots with highest price-per-coin first
+3. **Optimal Tax Matching**: When selling, prioritizes long-term gains first, then highest cost within each category
 4. **Withdrawal Handling**: Withdrawals reduce lot quantities without creating taxable events
 5. **Year-Specific Reporting**: Only sales from the target year appear in output
 
 ### Key Features
 
+- **Long-Term Gain Prioritization**: Automatically prioritizes favorable long-term capital gains tax rates
 - **Precise Calculations**: Uses go-money library to avoid floating-point precision errors
 - **Chronological Integrity**: Sales can only use lots acquired before the sale date
 - **Lot Splitting**: Supports partial lot sales with accurate remaining quantities
@@ -184,7 +198,16 @@ The program implements the Optimized HIFO (Highest In, First Out) method - a tax
 
 ## Tax Compliance
 
-The output CSV format is designed to be compatible with:
+The program follows IRS regulations for capital gains reporting with proper holding period compliance:
+
+### Form 8949 Compliance
+
+- **Part I (Short-Term)**: Capital gains/losses for assets held ≤1 year
+- **Part II (Long-Term)**: Capital gains/losses for assets held >1 year  
+- **Automatic Categorization**: Uses exact date calculations for holding period determination
+- **Individual Lot Reporting**: Each tax lot reported separately as required
+
+### Compatible With
 
 - IRS Form 8949 (Sales and Other Dispositions of Capital Assets)
 - Schedule D (Capital Gains and Losses)

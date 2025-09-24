@@ -104,7 +104,7 @@ func processSale(amountBTC, proceedsUSD *money.Money, saleDate time.Time, lots *
 
 	remaining := amountBTC
 
-	// Sort lots by cost basis per coin (highest first for HIFO)
+	// Sort lots for optimal tax outcome: Long-term HIFO first, then Short-term HIFO
 	sortedIndices := make([]int, len(*lots))
 	for i := range sortedIndices {
 		sortedIndices[i] = i
@@ -121,7 +121,19 @@ func processSale(amountBTC, proceedsUSD *money.Money, saleDate time.Time, lots *
 			return true
 		}
 
-		// Calculate price per coin for HIFO (highest cost first)
+		// Calculate holding periods
+		isLongTermI := saleDate.Sub(lotI.Date) > 365*24*time.Hour
+		isLongTermJ := saleDate.Sub(lotJ.Date) > 365*24*time.Hour
+
+		// Prioritize long-term over short-term
+		if isLongTermI && !isLongTermJ {
+			return true
+		}
+		if !isLongTermI && isLongTermJ {
+			return false
+		}
+
+		// Within the same term category, use HIFO (highest cost first)
 		gt, err := lotI.PricePerCoin.GreaterThan(lotJ.PricePerCoin)
 		if err != nil {
 			return false
@@ -159,11 +171,15 @@ func processSale(amountBTC, proceedsUSD *money.Money, saleDate time.Time, lots *
 		costBasisForPortionFloat := (costBasisFloat / amountFloat) * sellAmountFloat
 		costBasisForPortion := money.New(int64(costBasisForPortionFloat), money.USD)
 
+		// Calculate holding period
+		isLongTerm := saleDate.Sub(lot.Date) > 365*24*time.Hour
+
 		lotSale := LotSale{
 			LotDate:      lot.Date,
 			AmountBTC:    sellAmount,
 			CostBasisUSD: costBasisForPortion,
 			PricePerCoin: money.New(int64(costBasisFloat/amountFloat), money.USD),
+			IsLongTerm:   isLongTerm,
 		}
 
 		sale.Lots = append(sale.Lots, lotSale)

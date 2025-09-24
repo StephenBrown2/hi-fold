@@ -47,6 +47,7 @@ type LotSale struct {
 	AmountBTC    *money.Money
 	CostBasisUSD *money.Money
 	PricePerCoin *money.Money
+	IsLongTerm   bool // True if held for more than 1 year
 }
 
 // TaxRecord represents a record for IRS Form 8949

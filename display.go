@@ -6,10 +6,70 @@ import (
 	"github.com/Rhymond/go-money"
 )
 
+// createSaleFromLots creates a Sale record from a subset of lots, calculating proportional proceeds
+func createSaleFromLots(originalSale Sale, lots []LotSale) Sale {
+	sale := Sale{
+		Date: originalSale.Date,
+		Lots: lots,
+	}
+
+	// Calculate totals for this subset of lots
+	sale.AmountBTC = money.New(0, "BTC")
+	sale.CostBasisUSD = money.New(0, money.USD)
+
+	for _, lot := range lots {
+		sale.AmountBTC, _ = sale.AmountBTC.Add(lot.AmountBTC)
+		sale.CostBasisUSD, _ = sale.CostBasisUSD.Add(lot.CostBasisUSD)
+	}
+
+	// Calculate proportional proceeds
+	if !originalSale.AmountBTC.IsZero() {
+		proceedsFloat := float64(originalSale.ProceedsUSD.Amount()) / 100
+		saleAmountFloat := float64(originalSale.AmountBTC.Amount()) / 100000000
+		subsetAmountFloat := float64(sale.AmountBTC.Amount()) / 100000000
+		subsetProceedsFloat := (proceedsFloat / saleAmountFloat) * subsetAmountFloat
+		sale.ProceedsUSD = money.NewFromFloat(subsetProceedsFloat, money.USD)
+	} else {
+		sale.ProceedsUSD = money.New(0, money.USD)
+	}
+
+	sale.GainLossUSD, _ = sale.ProceedsUSD.Subtract(sale.CostBasisUSD)
+	return sale
+}
+
 func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year int, priceAPI PriceAPI) {
 	fmt.Println(titleStyle.Render(fmt.Sprintf("Bitcoin HIFO Cost Basis Report - %d", year)))
 
-	// Summary table
+	// Separate sales into short-term and long-term
+	var shortTermSales []Sale
+	var longTermSales []Sale
+
+	for _, sale := range sales {
+		// Create separate sales for short-term and long-term portions
+		var shortTermLots []LotSale
+		var longTermLots []LotSale
+
+		for _, lot := range sale.Lots {
+			if lot.IsLongTerm {
+				longTermLots = append(longTermLots, lot)
+			} else {
+				shortTermLots = append(shortTermLots, lot)
+			}
+		}
+
+		// Create separate sale records if there are both types
+		if len(shortTermLots) > 0 {
+			shortTermSale := createSaleFromLots(sale, shortTermLots)
+			shortTermSales = append(shortTermSales, shortTermSale)
+		}
+
+		if len(longTermLots) > 0 {
+			longTermSale := createSaleFromLots(sale, longTermLots)
+			longTermSales = append(longTermSales, longTermSale)
+		}
+	}
+
+	// Overall summary table
 	summaryTable := newTable().
 		StyleFunc(summaryTableStyleFunc()).
 		Headers("Metric", "Value")
@@ -33,34 +93,71 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 	fmt.Println(summaryTable.Render())
 	fmt.Println()
 
-	// Sales detail table
-	if len(sales) > 0 {
-		salesTable := newTable().
-			StyleFunc(monetaryTableStyleFunc()).
-			Headers("Date Sold", "Amount (BTC)", "Proceeds ($)", "Cost Basis ($)", "Price/BTC", "Gain/Loss ($)")
-
-		for _, sale := range sales {
-			// Calculate average price per BTC: proceeds ÷ amount
-			// Note: go-money doesn't have division, so we convert to float64 for price calculations
-			proceedsFloat := float64(sale.ProceedsUSD.Amount()) / 100   // go-money uses smallest unit
-			amountFloat := float64(sale.AmountBTC.Amount()) / 100000000 // 8 decimal places for BTC
-			avgPriceFloat := proceedsFloat / amountFloat
-			avgPrice := money.NewFromFloat(avgPriceFloat, money.USD)
-
-			salesTable.Row(
-				sale.Date.Format("2006-01-02"),
-				sale.AmountBTC.Display(),
-				sale.ProceedsUSD.Display(),
-				sale.CostBasisUSD.Display(),
-				avgPrice.Display(),
-				displayRedGreen(sale.GainLossUSD),
-			)
-		}
-
-		fmt.Println(titleStyle.Render("Sales Details"))
-		fmt.Println(salesTable.Render())
+	// Short-Term Sales Detail Table
+	if len(shortTermSales) > 0 {
+		displaySalesTable("Short-Term Sales Details (≤1 Year Holding Period)", shortTermSales)
 	}
 
+	// Long-Term Sales Detail Table
+	if len(longTermSales) > 0 {
+		displaySalesTable("Long-Term Sales Details (>1 Year Holding Period)", longTermSales)
+	}
+
+	displayHoldings(lots, priceAPI)
+}
+
+// displaySalesTable shows a table of sales with summary totals
+func displaySalesTable(title string, sales []Sale) {
+	if len(sales) == 0 {
+		return
+	}
+
+	salesTable := newTable().
+		StyleFunc(monetaryTableStyleFunc()).
+		Headers("Date Sold", "Amount (BTC)", "Proceeds ($)", "Cost Basis ($)", "Price/BTC", "Gain/Loss ($)")
+
+	totalProceeds := money.New(0, money.USD)
+	totalCostBasis := money.New(0, money.USD)
+	totalGainLoss := money.New(0, money.USD)
+
+	for _, sale := range sales {
+		// Calculate average price per BTC: proceeds ÷ amount
+		proceedsFloat := float64(sale.ProceedsUSD.Amount()) / 100   // go-money uses smallest unit
+		amountFloat := float64(sale.AmountBTC.Amount()) / 100000000 // 8 decimal places for BTC
+		avgPriceFloat := proceedsFloat / amountFloat
+		avgPrice := money.NewFromFloat(avgPriceFloat, money.USD)
+
+		salesTable.Row(
+			sale.Date.Format("2006-01-02"),
+			sale.AmountBTC.Display(),
+			sale.ProceedsUSD.Display(),
+			sale.CostBasisUSD.Display(),
+			avgPrice.Display(),
+			displayRedGreen(sale.GainLossUSD),
+		)
+
+		totalProceeds, _ = totalProceeds.Add(sale.ProceedsUSD)
+		totalCostBasis, _ = totalCostBasis.Add(sale.CostBasisUSD)
+		totalGainLoss, _ = totalGainLoss.Add(sale.GainLossUSD)
+	}
+
+	// Add totals row
+	salesTable.Row(
+		"TOTALS:",
+		"",
+		totalProceeds.Display(),
+		totalCostBasis.Display(),
+		"",
+		displayRedGreen(totalGainLoss),
+	)
+
+	fmt.Println(titleStyle.Render(title))
+	fmt.Println(salesTable.Render())
+	fmt.Println()
+}
+
+// displayHoldings shows the remaining BTC holdings
+func displayHoldings(lots []Lot, priceAPI PriceAPI) {
 	// Remaining lots
 	remainingLots := []Lot{}
 	for _, lot := range lots {

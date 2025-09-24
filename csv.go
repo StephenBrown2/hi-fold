@@ -170,6 +170,7 @@ func parseTransaction(record []string) (Transaction, error) {
 }
 
 // generateTaxRecords creates a CSV file with tax records for IRS Form 8949
+// Separates short-term and long-term gains as required by tax regulations
 func generateTaxRecords(sales []Sale, filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
@@ -180,24 +181,16 @@ func generateTaxRecords(sales []Sale, filename string) error {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Write header
-	headers := []string{
-		"Description",
-		"Date Acquired",
-		"Date Sold",
-		"Proceeds",
-		"Cost Basis",
-		"Gain/Loss",
-	}
-	if err := writer.Write(headers); err != nil {
-		return err
-	}
+	// Separate transactions into short-term and long-term
+	var shortTermRecords [][]string
+	var longTermRecords [][]string
 
-	// Write records
+	var shortTermProceeds, shortTermCostBasis, shortTermGainLoss float64
+	var longTermProceeds, longTermCostBasis, longTermGainLoss float64
+
 	for _, sale := range sales {
 		for _, lotSale := range sale.Lots {
 			// Calculate proceeds and gain/loss for this lot
-			// Note: go-money doesn't have division, so we convert to float64 for price calculations
 			proceedsFloat := float64(sale.ProceedsUSD.Amount()) / 100         // USD in smallest unit
 			saleAmountFloat := float64(sale.AmountBTC.Amount()) / 100000000   // BTC in smallest unit
 			lotAmountFloat := float64(lotSale.AmountBTC.Amount()) / 100000000 // BTC in smallest unit
@@ -215,9 +208,100 @@ func generateTaxRecords(sales []Sale, filename string) error {
 				fmt.Sprintf("%.2f", costBasisFloat),
 				fmt.Sprintf("%.2f", lotGainLoss),
 			}
+
+			if lotSale.IsLongTerm {
+				longTermRecords = append(longTermRecords, record)
+				longTermProceeds += lotProceeds
+				longTermCostBasis += costBasisFloat
+				longTermGainLoss += lotGainLoss
+			} else {
+				shortTermRecords = append(shortTermRecords, record)
+				shortTermProceeds += lotProceeds
+				shortTermCostBasis += costBasisFloat
+				shortTermGainLoss += lotGainLoss
+			}
+		}
+	}
+
+	// Write headers
+	headers := []string{
+		"Description",
+		"Date Acquired",
+		"Date Sold",
+		"Proceeds",
+		"Cost Basis",
+		"Gain/Loss",
+	}
+
+	// Write Short-Term Capital Gains section
+	if len(shortTermRecords) > 0 {
+		if err := writer.Write([]string{"SHORT-TERM CAPITAL GAINS AND LOSSES (Form 8949 Part I)"}); err != nil {
+			return err
+		}
+		if err := writer.Write([]string{}); err != nil { // Empty line
+			return err
+		}
+		if err := writer.Write(headers); err != nil {
+			return err
+		}
+
+		for _, record := range shortTermRecords {
 			if err := writer.Write(record); err != nil {
 				return err
 			}
+		}
+
+		// Add totals row
+		totalsRow := []string{
+			"TOTALS:",
+			"",
+			"",
+			fmt.Sprintf("%.2f", shortTermProceeds),
+			fmt.Sprintf("%.2f", shortTermCostBasis),
+			fmt.Sprintf("%.2f", shortTermGainLoss),
+		}
+		if err := writer.Write(totalsRow); err != nil {
+			return err
+		}
+
+		// Add separator
+		if err := writer.Write([]string{}); err != nil {
+			return err
+		}
+		if err := writer.Write([]string{}); err != nil {
+			return err
+		}
+	}
+
+	// Write Long-Term Capital Gains section
+	if len(longTermRecords) > 0 {
+		if err := writer.Write([]string{"LONG-TERM CAPITAL GAINS AND LOSSES (Form 8949 Part II)"}); err != nil {
+			return err
+		}
+		if err := writer.Write([]string{}); err != nil { // Empty line
+			return err
+		}
+		if err := writer.Write(headers); err != nil {
+			return err
+		}
+
+		for _, record := range longTermRecords {
+			if err := writer.Write(record); err != nil {
+				return err
+			}
+		}
+
+		// Add totals row
+		totalsRow := []string{
+			"TOTALS:",
+			"",
+			"",
+			fmt.Sprintf("%.2f", longTermProceeds),
+			fmt.Sprintf("%.2f", longTermCostBasis),
+			fmt.Sprintf("%.2f", longTermGainLoss),
+		}
+		if err := writer.Write(totalsRow); err != nil {
+			return err
 		}
 	}
 
