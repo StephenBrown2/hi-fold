@@ -170,13 +170,15 @@ func processSale(tx Transaction, lots *[]Lot) Sale {
 		}
 
 		// Within the same priority category, optimize the selection:
-		// For losses: prefer higher cost (bigger loss for tax purposes)
-		// For gains: prefer lower cost (smaller gain for tax purposes)
+		// For losses: prefer higher diff (bigger loss for tax purposes)
+		// For gains: prefer lower diff (smaller gain for tax purposes)
 		if isLossI == isLossJ {
+			diffPerCoinI := salePricePerCoin - costPerCoinI
+			diffPerCoinJ := salePricePerCoin - costPerCoinJ
 			if isLossI { // Both are losses
-				return costPerCoinI > costPerCoinJ // Bigger loss first
+				return diffPerCoinI < diffPerCoinJ // Bigger loss first
 			} else { // Both are gains
-				return costPerCoinI < costPerCoinJ // Smaller gain first
+				return diffPerCoinJ > diffPerCoinI // Smaller gain first
 			}
 		}
 
