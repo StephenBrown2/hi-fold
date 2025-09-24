@@ -11,7 +11,7 @@ import (
 func filterTransactionsByYear(transactions []Transaction, year int) []Transaction {
 	var filtered []Transaction
 	for _, tx := range transactions {
-		if tx.Date.Year() <= year {
+		if tx.Date.Year() == year {
 			filtered = append(filtered, tx)
 		}
 	}
@@ -125,20 +125,58 @@ func processSale(amountBTC, proceedsUSD *money.Money, saleDate time.Time, lots *
 		isLongTermI := saleDate.Sub(lotI.Date) > 365*24*time.Hour
 		isLongTermJ := saleDate.Sub(lotJ.Date) > 365*24*time.Hour
 
-		// Prioritize long-term over short-term
-		if isLongTermI && !isLongTermJ {
-			return true
-		}
-		if !isLongTermI && isLongTermJ {
-			return false
+		// Use transaction's PricePerCoin if available, otherwise calculate from proceeds
+		var salePricePerCoin int64
+		if !tx.PricePerCoin.IsZero() {
+			salePricePerCoin = tx.PricePerCoin.Amount()
+		} else {
+			// Fallback: calculate from proceeds
+			// proceedsUSD.Amount() is in cents, amountBTC.Amount() is in satoshis
+			// We need cents per BTC, so: (cents * 100000000 satoshis/BTC) / satoshis
+			salePricePerCoin = (proceedsUSD.Amount() * 100000000) / amountBTC.Amount()
 		}
 
-		// Within the same term category, use HIFO (highest cost first)
-		gt, err := lotI.PricePerCoin.GreaterThan(lotJ.PricePerCoin)
-		if err != nil {
-			return false
+		// Determine gain/loss for each lot
+		costPerCoinI := lotI.PricePerCoin.Amount()
+		costPerCoinJ := lotJ.PricePerCoin.Amount()
+
+		isLossI := salePricePerCoin < costPerCoinI
+		isLossJ := salePricePerCoin < costPerCoinJ
+
+		// Calculate priority scores (lower score = higher priority)
+		// Priority order: Long-term loss(0) > Short-term loss(1) > Long-term gain(2) > Short-term gain(3)
+		getPriorityScore := func(isLongTerm, isLoss bool) int {
+			if isLongTerm && isLoss {
+				return 0 // Long-term loss - highest priority
+			} else if !isLongTerm && isLoss {
+				return 1 // Short-term loss - second priority
+			} else if isLongTerm && !isLoss {
+				return 2 // Long-term gain - third priority
+			} else {
+				return 3 // Short-term gain - lowest priority
+			}
 		}
-		return gt
+
+		priorityI := getPriorityScore(isLongTermI, isLossI)
+		priorityJ := getPriorityScore(isLongTermJ, isLossJ)
+
+		// First, sort by priority
+		if priorityI != priorityJ {
+			return priorityI < priorityJ
+		}
+
+		// Within the same priority category, optimize the selection:
+		// For losses: prefer higher cost (bigger loss for tax purposes)
+		// For gains: prefer lower cost (smaller gain for tax purposes)
+		if isLossI == isLossJ {
+			if isLossI { // Both are losses
+				return costPerCoinI > costPerCoinJ // Bigger loss first
+			} else { // Both are gains
+				return costPerCoinI < costPerCoinJ // Smaller gain first
+			}
+		}
+
+		return false
 	})
 
 	for _, idx := range sortedIndices {
@@ -248,4 +286,170 @@ func processWithdrawal(amountBTC *money.Money, withdrawalDate time.Time, lots *[
 		lot.Remaining, _ = lot.Remaining.Subtract(withdrawAmount)
 		remaining, _ = remaining.Subtract(withdrawAmount)
 	}
+}
+
+// YearResult holds the lots and sales for a specific year
+type YearResult struct {
+	Year  int
+	Lots  []Lot
+	Sales []Sale
+}
+
+// calculateHIFOWithCache calculates HIFO for a single year using cache when available
+func calculateHIFOWithCache(transactions []Transaction, priceAPI PriceAPI, targetYear int, cache *Cache, inputFiles []string) ([]Lot, []Sale) {
+	// Try to load cached state for the previous year
+	var startingLots []Lot
+
+	if targetYear > 1 {
+		if cachedState, err := cache.loadYearEndState(targetYear-1, inputFiles); err == nil {
+			fmt.Printf("Using cached lot state from end of %d\n", targetYear-1)
+			startingLots = cachedState.Lots
+		} else {
+			fmt.Printf("Cache miss for year %d, calculating from scratch: %v\n", targetYear-1, err)
+			// Calculate from beginning up to previous year
+			startingLots, prevYearSales := calculateHIFO(transactions, priceAPI, targetYear-1)
+			// Cache the previous year's ending state
+			if err := cache.saveYearEndState(targetYear-1, startingLots, prevYearSales, inputFiles); err != nil {
+				fmt.Printf("Warning: Failed to cache year-end state for %d: %v\n", targetYear-1, err)
+			}
+		}
+	}
+
+	// Process only the target year's transactions starting from cached lots
+	yearTransactions := filterTransactionsByYear(transactions, targetYear)
+	lots, sales := calculateHIFOFromState(yearTransactions, priceAPI, targetYear, startingLots)
+
+	// Cache this year's ending state
+	if err := cache.saveYearEndState(targetYear, lots, sales, inputFiles); err != nil {
+		fmt.Printf("Warning: Failed to cache year-end state for %d: %v\n", targetYear, err)
+	}
+
+	return lots, sales
+}
+
+// calculateAllYearsWithCache processes all years with sales using cache
+func calculateAllYearsWithCache(transactions []Transaction, priceAPI PriceAPI, cache *Cache, inputFiles []string) map[int]YearResult {
+	results := make(map[int]YearResult)
+
+	// Find all years with sales
+	salesYears := make(map[int]bool)
+	for _, tx := range transactions {
+		if tx.TransactionType == "Sale" {
+			salesYears[tx.Date.Year()] = true
+		}
+	}
+
+	// Sort years for sequential processing
+	var years []int
+	for year := range salesYears {
+		years = append(years, year)
+	}
+	sort.Ints(years)
+
+	var currentLots []Lot
+
+	for _, year := range years {
+		// Try to load cached state
+		if cachedState, err := cache.loadYearEndState(year, inputFiles); err == nil {
+			fmt.Printf("Using cached results for year %d\n", year)
+			results[year] = YearResult{
+				Year:  year,
+				Lots:  cachedState.Lots,
+				Sales: cachedState.Sales,
+			}
+			// For cached results, we still need to update currentLots to the ending state
+			// This ensures the next year starts with the correct lot state
+			currentLots = cachedState.Lots
+		} else {
+			fmt.Printf("Calculating year %d...\n", year)
+			// Calculate this year starting from current lot state
+			yearTransactions := filterTransactionsByYear(transactions, year)
+			lots, sales := calculateHIFOFromState(yearTransactions, priceAPI, year, currentLots)
+
+			results[year] = YearResult{
+				Year:  year,
+				Lots:  lots,
+				Sales: sales,
+			}
+			currentLots = lots
+
+			// Cache this year's ending state
+			if err := cache.saveYearEndState(year, lots, sales, inputFiles); err != nil {
+				fmt.Printf("Warning: Failed to cache year-end state for %d: %v\n", year, err)
+			}
+		}
+	}
+
+	return results
+}
+
+// calculateHIFOFromState calculates HIFO starting from a given lot state
+func calculateHIFOFromState(transactions []Transaction, priceAPI PriceAPI, targetYear int, startingLots []Lot) ([]Lot, []Sale) {
+	lots := make([]Lot, len(startingLots))
+	copy(lots, startingLots)
+	var sales []Sale
+
+	// Sort transactions by date
+	sort.Slice(transactions, func(i, j int) bool {
+		return transactions[i].Date.Before(transactions[j].Date)
+	})
+
+	for _, tx := range transactions {
+		// Only process transactions from target year and earlier
+		if tx.Date.Year() > targetYear {
+			continue
+		}
+
+		switch tx.TransactionType {
+		case "Purchase", "Deposit":
+			if tx.Date.Year() <= targetYear {
+				lot := Lot{
+					Date:         tx.Date,
+					AmountBTC:    tx.AmountBTC,
+					CostBasisUSD: tx.TotalUSD.Absolute(),
+					PricePerCoin: tx.PricePerCoin,
+					Remaining:    tx.AmountBTC,
+				}
+
+				// Handle price fetching similar to original calculateHIFO
+				if !tx.PricePerCoin.IsZero() {
+					lots = append(lots, lot)
+					continue
+				}
+
+				price, err := priceAPI.GetBTCPriceUSD(tx.Date)
+				if err != nil {
+					fmt.Printf("Warning: Could not fetch price for %s, using zero cost basis: %v\n",
+						tx.Date.Format("2006-01-02"), err)
+					lot.CostBasisUSD = money.New(0, money.USD)
+					lot.PricePerCoin = money.New(0, money.USD)
+					lots = append(lots, lot)
+					continue
+				}
+
+				lot.PricePerCoin = money.NewFromFloat(price, money.USD)
+				if tx.TotalUSD.IsZero() {
+					btcAmount := tx.AmountBTC.Amount()
+					costBasisCents := int64(price*100) * btcAmount / 100000000
+					lot.CostBasisUSD = money.New(costBasisCents, money.USD)
+				}
+
+				fmt.Printf("Fetched historical price for %s on %s: $%.2f\n",
+					tx.TransactionType, tx.Date.Local().Format(time.RFC1123), price)
+
+				lots = append(lots, lot)
+			}
+
+		case "Sale":
+			sale := processSale(tx.AmountBTC.Absolute(), tx.TotalUSD, tx.Date, &lots)
+			if tx.Date.Year() == targetYear {
+				sales = append(sales, sale)
+			}
+
+		case "Withdrawal":
+			processWithdrawal(tx.AmountBTC.Absolute(), tx.Date, &lots)
+		}
+	}
+
+	return lots, sales
 }
