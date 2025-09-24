@@ -79,7 +79,7 @@ func calculateHIFO(transactions []Transaction, priceAPI PriceAPI, targetYear int
 
 		case "Sale":
 			// Process all sales to correctly track remaining holdings
-			sale := processSale(tx.AmountBTC.Absolute(), tx.TotalUSD, tx.Date, &lots)
+			sale := processSale(tx, &lots)
 			// Only include sales from the target year in the returned sales slice for display
 			if tx.Date.Year() == targetYear {
 				sales = append(sales, sale)
@@ -87,14 +87,18 @@ func calculateHIFO(transactions []Transaction, priceAPI PriceAPI, targetYear int
 
 		case "Withdrawal":
 			// Process withdrawals to reduce remaining holdings (but don't create taxable sale records)
-			processWithdrawal(tx.AmountBTC.Absolute(), tx.Date, &lots)
+			processWithdrawal(tx, &lots)
 		}
 	}
 
 	return lots, sales
 }
 
-func processSale(amountBTC, proceedsUSD *money.Money, saleDate time.Time, lots *[]Lot) Sale {
+func processSale(tx Transaction, lots *[]Lot) Sale {
+	amountBTC := tx.AmountBTC.Absolute()
+	proceedsUSD := tx.TotalUSD
+	saleDate := tx.Date
+
 	sale := Sale{
 		Date:         saleDate,
 		AmountBTC:    amountBTC,
@@ -232,7 +236,9 @@ func processSale(amountBTC, proceedsUSD *money.Money, saleDate time.Time, lots *
 	return sale
 }
 
-func processWithdrawal(amountBTC *money.Money, withdrawalDate time.Time, lots *[]Lot) {
+func processWithdrawal(tx Transaction, lots *[]Lot) {
+	amountBTC := tx.AmountBTC.Absolute()
+	withdrawalDate := tx.Date
 	remaining := amountBTC
 
 	// Sort lots by cost basis per coin (highest first for HIFO)
@@ -441,13 +447,13 @@ func calculateHIFOFromState(transactions []Transaction, priceAPI PriceAPI, targe
 			}
 
 		case "Sale":
-			sale := processSale(tx.AmountBTC.Absolute(), tx.TotalUSD, tx.Date, &lots)
+			sale := processSale(tx, &lots)
 			if tx.Date.Year() == targetYear {
 				sales = append(sales, sale)
 			}
 
 		case "Withdrawal":
-			processWithdrawal(tx.AmountBTC.Absolute(), tx.Date, &lots)
+			processWithdrawal(tx, &lots)
 		}
 	}
 
