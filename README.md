@@ -45,11 +45,12 @@ go build -o hi-fold .
 ./hi-fold [flags]
 
 Flags:
-  -h, --help            help for hi-fold
-  -i, --input strings   Input CSV files (can specify multiple, required)
-  -m, --mock-prices     Use mock prices instead of API for testing
-  -o, --output string   Output CSV file (default: tax-records-{year}.csv)
-  -y, --year int        Tax year to calculate (default: previous year)
+  -h, --help             help for hi-fold
+  -i, --input strings    Input CSV files (can specify multiple, required)
+      --mempool-url      Custom mempool API base URL (default: mempool.space)  
+  -m, --mock-prices      Use mock prices instead of API for testing
+  -o, --output string    Output CSV file (default: tax-records-{year}.csv)
+  -y, --year int         Tax year to calculate (default: previous year)
 ```
 
 ### Basic Usage Examples
@@ -97,6 +98,31 @@ The program supports processing multiple CSV files simultaneously with automatic
 ## Historical Price Integration
 
 The program automatically fetches historical Bitcoin prices from [mempool.space](https://mempool.space) API for transactions missing price data, ensuring accurate cost basis calculations. Use the `--mock-prices` flag for testing without API calls.
+
+### Custom API Configuration
+
+You can configure a custom mempool.space API base URL using the `--mempool-url` flag:
+
+```bash
+# Use a custom mempool.space instance (domain only)
+./hi-fold --year 2025 --input transactions.csv --mempool-url "custom.mempool.space"
+
+# Use a full URL with HTTPS protocol
+./hi-fold --year 2025 --input transactions.csv --mempool-url "https://my-mempool-server.com"
+
+# Use HTTP protocol (not recommended for production)
+./hi-fold --year 2025 --input transactions.csv --mempool-url "http://localhost:3006"
+
+# Use IP address with custom port
+./hi-fold --year 2025 --input transactions.csv --mempool-url "192.168.1.100:8080"
+```
+
+The URL normalization automatically handles:
+
+- Domain-only input (adds `https://` prefix)
+- Full URLs with protocol (used as-is)
+- IP addresses with ports (adds `https://` prefix)
+- Trailing slash removal for consistency
 
 ## Input Format
 

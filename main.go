@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	targetYear    int
-	inputFiles    []string
-	outputFile    string
-	useMockPrices bool
+	targetYear     int
+	inputFiles     []string
+	outputFile     string
+	useMockPrices  bool
+	mempoolBaseURL string
 )
 
 var rootCmd = &cobra.Command{
@@ -36,6 +37,7 @@ func init() {
 	rootCmd.Flags().StringSliceVarP(&inputFiles, "input", "i", []string{}, "Input CSV files (can specify multiple)")
 	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output CSV file (default: tax-records-{year}.csv)")
 	rootCmd.Flags().BoolVarP(&useMockPrices, "mock-prices", "m", false, "Use mock prices instead of API for testing")
+	rootCmd.Flags().StringVar(&mempoolBaseURL, "mempool-url", "", "Custom mempool API base URL (e.g., mempool.space, https://mempool.space, http://192.168.1.100:8080)")
 }
 
 // expandGlobPatterns expands glob patterns in file paths and returns actual file paths
@@ -101,8 +103,12 @@ func runHIFO(cmd *cobra.Command, args []string) {
 		priceAPI = NewMockPriceAPI()
 		fmt.Println("Using mock prices for testing")
 	} else {
-		priceAPI = NewMempoolPriceAPI()
-		fmt.Println("Using mempool.space API for historical prices")
+		priceAPI = NewMempoolPriceAPIWithURL(mempoolBaseURL)
+		if mempoolBaseURL != "" {
+			fmt.Printf("Using custom mempool API: %s\n", mempoolBaseURL)
+		} else {
+			fmt.Println("Using mempool.space API for historical prices")
+		}
 	}
 
 	// Parse and merge CSV files

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -33,18 +35,66 @@ type PriceAPI interface {
 
 // MempoolPriceAPI implements PriceAPI using mempool.space
 type MempoolPriceAPI struct {
-	baseURL string
+	baseURL *url.URL
 	client  *http.Client
 }
 
 // NewMempoolPriceAPI creates a new mempool.space price API client
 func NewMempoolPriceAPI() *MempoolPriceAPI {
+	return NewMempoolPriceAPIWithURL("")
+}
+
+// NewMempoolPriceAPIWithURL creates a new mempool price API client with custom base URL
+func NewMempoolPriceAPIWithURL(base string) *MempoolPriceAPI {
+	if base == "" {
+		base = "https://mempool.space"
+	}
+
+	// Normalize and parse the URL
+	normalized := normalizeBaseURL(base)
+
+	// Add /api/v1 to the path using proper URL path joining
+	apiURL, _ := url.JoinPath(normalized.String(), "api/v1")
+	baseURL, _ := url.Parse(apiURL)
+
 	return &MempoolPriceAPI{
-		baseURL: "https://mempool.space/api/v1",
+		baseURL: baseURL,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// normalizeBaseURL normalizes the base URL to ensure proper format
+func normalizeBaseURL(raw string) *url.URL {
+	// If empty, use default
+	if raw == "" {
+		normalized, _ := url.Parse("https://mempool.space")
+		return normalized
+	}
+
+	// Parse the URL
+	normalized, err := url.Parse(raw)
+	if err != nil {
+		// If parsing fails, treat as a domain and add https://
+		fallback, _ := url.Parse("https://" + strings.TrimSuffix(raw, "/"))
+		return fallback
+	}
+
+	// If no scheme is provided, assume https
+	if normalized.Scheme == "" {
+		normalized.Scheme = "https"
+	}
+
+	// Ensure the URL has a valid scheme
+	if normalized.Scheme != "http" && normalized.Scheme != "https" {
+		normalized.Scheme = "https"
+	}
+
+	// Remove trailing slash from path
+	normalized.Path = strings.TrimSuffix(normalized.Path, "/")
+
+	return normalized
 }
 
 // GetHistoricalPrice fetches the historical Bitcoin price for a given timestamp
@@ -52,12 +102,17 @@ func (m *MempoolPriceAPI) GetHistoricalPrice(timestamp time.Time, currency strin
 	// Convert timestamp to Unix timestamp
 	unixTimestamp := timestamp.Unix()
 
-	// Build the URL
-	url := fmt.Sprintf("%s/historical-price?currency=%s&timestamp=%d",
-		m.baseURL, currency, unixTimestamp)
+	// Build the URL using proper URL construction
+	fullURL, _ := url.JoinPath(m.baseURL.String(), "historical-price")
+	apiURL, _ := url.Parse(fullURL)
+
+	query := apiURL.Query()
+	query.Set("currency", currency)
+	query.Set("timestamp", fmt.Sprintf("%d", unixTimestamp))
+	apiURL.RawQuery = query.Encode()
 
 	// Make the HTTP request
-	resp, err := m.client.Get(url)
+	resp, err := m.client.Get(apiURL.String())
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch price data: %w", err)
 	}
@@ -106,10 +161,12 @@ func (m *MempoolPriceAPI) GetBTCPriceUSD(timestamp time.Time) (float64, error) {
 
 // GetCurrentPriceUSD fetches the current Bitcoin price in USD
 func (m *MempoolPriceAPI) GetCurrentPriceUSD() (float64, error) {
-	url := fmt.Sprintf("%s/prices", m.baseURL)
+	// Build the URL using proper URL construction
+	fullURL, _ := url.JoinPath(m.baseURL.String(), "prices")
+	apiURL, _ := url.Parse(fullURL)
 
 	// Make the HTTP request
-	resp, err := m.client.Get(url)
+	resp, err := m.client.Get(apiURL.String())
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch current price: %w", err)
 	}
