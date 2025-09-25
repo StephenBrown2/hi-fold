@@ -119,9 +119,8 @@ You can configure a custom mempool.space API base URL using the `--mempool-url` 
 
 The URL normalization automatically handles:
 
-- Domain-only input (adds `https://` prefix)
-- Full URLs with protocol (used as-is)
-- IP addresses with ports (adds `https://` prefix)
+- Domain-only or IP address with port (adds `https://` prefix)
+- Full URL with protocol (used as-is)
 - Trailing slash removal for consistency
 
 ## Input Format
