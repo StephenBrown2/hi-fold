@@ -1,0 +1,7 @@
+"Account ID","MALFORMED-TEST"
+"Name","Malformed Data Test"
+
+"Reference ID","Date (UTC)","Transaction Type","Description","Asset","Amount (BTC)","Price per Coin (USD)","Subtotal (USD)","Fee (USD)","Total (USD)","Transaction ID"
+"malformed-001","invalid-date","Purchase","Bad Date","BTC","1.0","40000.00","-40000.00","0.00","-40000.00",""
+"malformed-002","2024-01-01 10:00:00.000000+00:00","Purchase","Bad BTC Amount","BTC","not-a-number","40000.00","-40000.00","0.00","-40000.00",""
+"malformed-003","2024-01-01 10:00:00.000000+00:00","Purchase","Missing Fields","BTC","1.0"

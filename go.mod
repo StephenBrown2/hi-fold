@@ -6,6 +6,8 @@ require (
 	github.com/Rhymond/go-money v1.0.15
 	github.com/charmbracelet/fang v0.4.2
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
+	github.com/matryer/is v1.4.1
+	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.1
 )
 
@@ -31,5 +33,5 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 )

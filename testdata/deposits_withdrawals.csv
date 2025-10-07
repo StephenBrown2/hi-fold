@@ -1,0 +1,7 @@
+"Account ID","TEST-DEPOSIT"
+"Name","Deposit Test"
+"Account Username","deposit@example.com"
+
+"Reference ID","Date (UTC)","Transaction Type","Description","Asset","Amount (BTC)","Price per Coin (USD)","Subtotal (USD)","Fee (USD)","Total (USD)","Transaction ID"
+"txn-deposit-001","2024-01-01 10:04:48.85507+00:00","Deposit","External Deposit","BTC","1.00000000","","","","","abc123def456"
+"txn-withdrawal-001","2024-06-01 23:31:08.650568+00:00","Withdrawal","External Withdrawal","BTC","-0.25000000","","","","","def789ghi012"

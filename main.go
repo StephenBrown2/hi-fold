@@ -11,6 +11,7 @@ import (
 
 	"github.com/Rhymond/go-money"
 	"github.com/charmbracelet/fang"
+	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
 
@@ -81,7 +82,7 @@ func main() {
 
 func runHIFO(cmd *cobra.Command, args []string) {
 	// Initialize cache
-	cache := NewCache("hi-fold")
+	cache := NewCache(afero.NewOsFs(), "hi-fold")
 
 	if clearCache {
 		if err := cache.Clear(); err != nil {
@@ -153,7 +154,7 @@ func runHIFO(cmd *cobra.Command, args []string) {
 
 func showCacheInformation(cache *Cache, inputFiles []string) {
 	fmt.Println("Cache Information:")
-	fmt.Printf("Cache directory: %s\n", cache.dir)
+	fmt.Printf("Cache directory: %s\n", cache.GetCacheInfo())
 
 	// Find all years with potential cache entries
 	// This is a simplified implementation - in practice you might scan the cache directory

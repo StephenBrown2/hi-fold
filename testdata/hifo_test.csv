@@ -1,0 +1,9 @@
+"Account ID","TEST-456"
+"Name","Test User 2"
+"Account Username","test2@example.com"
+
+"Reference ID","Date (UTC)","Transaction Type","Description","Asset","Amount (BTC)","Price per Coin (USD)","Subtotal (USD)","Fee (USD)","Total (USD)","Transaction ID"
+"txn-hifo-001","2024-01-01 20:05:24.057665+00:00","Purchase","Low Price Purchase","BTC","1.00000000","30000.00","-30000.00","0.00","-30000.00",""
+"txn-hifo-002","2024-01-02 18:25:18.196113+00:00","Purchase","High Price Purchase","BTC","1.00000000","50000.00","-50000.00","0.00","-50000.00",""
+"txn-hifo-003","2024-01-03 01:02:56.217888+00:00","Purchase","Medium Price Purchase","BTC","1.00000000","40000.00","-40000.00","0.00","-40000.00",""
+"txn-hifo-004","2024-12-01 16:57:14.199357+00:00","Sale","HIFO Test Sale","BTC","-1.50000000","60000.00","90000.00","0.00","90000.00",""

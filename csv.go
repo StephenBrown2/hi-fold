@@ -4,8 +4,9 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Rhymond/go-money"
@@ -92,9 +93,13 @@ func parseAndMergeCSVs(filenames []string) ([]Transaction, error) {
 		allTransactions = append(allTransactions, tx)
 	}
 
-	// Sort chronologically by date
-	sort.Slice(allTransactions, func(i, j int) bool {
-		return allTransactions[i].Date.Before(allTransactions[j].Date)
+	// Sort chronologically by date, with ReferenceID as tie-breaker for deterministic ordering
+	slices.SortStableFunc(allTransactions, func(a, b Transaction) int {
+		if cmp := a.Date.Compare(b.Date); cmp != 0 {
+			return cmp
+		}
+		// Use ReferenceID as tie-breaker for consistent ordering
+		return strings.Compare(a.ReferenceID, b.ReferenceID)
 	})
 
 	return allTransactions, nil

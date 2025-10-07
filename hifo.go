@@ -148,16 +148,18 @@ func processSale(tx Transaction, lots *[]Lot) Sale {
 		isLossJ := salePricePerCoin < costPerCoinJ
 
 		// Calculate priority scores (lower score = higher priority)
-		// Priority order: Long-term loss(0) > Short-term loss(1) > Long-term gain(2) > Short-term gain(3)
+		// Priority order for tax optimization:
+		// Long-term loss(0) > Short-term loss(1) > Short-term gain(2) > Long-term gain(3)
+		// Rationale: Losses offset gains. For gains, minimize high-tax short-term first, defer low-tax long-term.
 		getPriorityScore := func(isLongTerm, isLoss bool) int {
 			if isLongTerm && isLoss {
-				return 0 // Long-term loss - highest priority
+				return 0 // Long-term loss - highest priority (offset gains + favorable tax treatment)
 			} else if !isLongTerm && isLoss {
-				return 1 // Short-term loss - second priority
-			} else if isLongTerm && !isLoss {
-				return 2 // Long-term gain - third priority
+				return 1 // Short-term loss - second priority (offset gains)
+			} else if !isLongTerm && !isLoss {
+				return 2 // Short-term gain - third priority (high tax rate, minimize first)
 			} else {
-				return 3 // Short-term gain - lowest priority
+				return 3 // Long-term gain - lowest priority (low tax rate, defer when possible)
 			}
 		}
 
