@@ -834,8 +834,89 @@ func TestHIFOConsistency(t *testing.T) {
 // TestHIFOCorrectness verifies HIFO logic with a simple controlled scenario
 func TestHIFOCorrectness(t *testing.T) {
 	t.Run("HIFO selects highest cost basis lots first", func(t *testing.T) {
-		// This test is already covered in hifo_test.go
+		// This test is already covered in hifo_unit_test.go
 		// We'll keep the existing detailed tests there
-		t.Skip("Detailed correctness tests are in hifo_test.go")
+		t.Skip("Detailed correctness tests are in hifo_unit_test.go")
+	})
+}
+
+// TestHIFODetailedCSVAnalysis provides in-depth analysis of a single CSV scenario
+func TestHIFODetailedCSVAnalysis(t *testing.T) {
+	csvFile := "real_historical_2022_2024.csv"
+	targetYear := 2024
+
+	t.Run("Detailed Real Historical Analysis", func(t *testing.T) {
+		fmt.Printf("\n🔍 === DETAILED ANALYSIS: %s ===\n", csvFile)
+
+		// Load transactions
+		fullPath := filepath.Join("testdata", csvFile)
+		transactions, err := parseCSV(fullPath)
+		if err != nil {
+			t.Fatalf("Failed to load transactions: %v", err)
+		}
+
+		fmt.Printf("📊 Total transactions loaded: %d\n", len(transactions))
+
+		// Analyze transaction distribution by year
+		yearCounts := make(map[int]int)
+		for _, tx := range transactions {
+			yearCounts[tx.Date.Year()]++
+		}
+
+		fmt.Printf("\n📅 Transaction distribution by year:\n")
+		for year := 2022; year <= 2024; year++ {
+			if count, exists := yearCounts[year]; exists {
+				fmt.Printf("  %d: %d transactions\n", year, count)
+			}
+		}
+
+		// Create mock API
+		mockAPI := NewMockPriceAPI()
+		for _, tx := range transactions {
+			dateKey := tx.Date.Format("2006-01-02")
+			price := float64(tx.PricePerCoin.Amount()) / 100
+			mockAPI.SetPrice(dateKey, price)
+		}
+
+		// Detailed HIFO analysis
+		lots, hifoSales := calculateHIFO(transactions, mockAPI, targetYear)
+
+		fmt.Printf("\n🏦 Lot inventory analysis:\n")
+		fmt.Printf("  Total lots created: %d\n", len(lots))
+
+		remainingBTC := 0.0
+		totalCostBasis := 0.0
+		for _, lot := range lots {
+			if !lot.Remaining.IsZero() {
+				remainingBTC += float64(lot.Remaining.Amount()) / 100000000
+				totalCostBasis += float64(lot.CostBasisUSD.Amount()) / 100
+			}
+		}
+
+		fmt.Printf("  Remaining BTC: %.8f\n", remainingBTC)
+		fmt.Printf("  Total cost basis: $%.2f\n", totalCostBasis)
+		if remainingBTC > 0 {
+			fmt.Printf("  Average cost per BTC: $%.2f\n", totalCostBasis/remainingBTC)
+		}
+
+		fmt.Printf("\n💰 Sales analysis for %d:\n", targetYear)
+		fmt.Printf("  Number of sales: %d\n", len(hifoSales))
+
+		totalProceeds := 0.0
+		totalBTCSold := 0.0
+		for i, sale := range hifoSales {
+			proceeds := float64(sale.ProceedsUSD.Amount()) / 100
+			btcSold := float64(sale.AmountBTC.Amount()) / 100000000
+			totalProceeds += proceeds
+			totalBTCSold += btcSold
+
+			fmt.Printf("  Sale %d: %.8f BTC for $%.2f (avg price: $%.2f)\n",
+				i+1, btcSold, proceeds, proceeds/btcSold)
+		}
+
+		if len(hifoSales) > 0 {
+			fmt.Printf("  Total sold: %.8f BTC for $%.2f (avg: $%.2f/BTC)\n",
+				totalBTCSold, totalProceeds, totalProceeds/totalBTCSold)
+		}
 	})
 }
