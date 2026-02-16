@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 
+	"charm.land/fang/v2"
 	"github.com/Rhymond/go-money"
-	"github.com/charmbracelet/fang"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )

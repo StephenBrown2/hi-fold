@@ -1,9 +1,9 @@
 package main
 
 import (
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/Rhymond/go-money"
-	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/lipgloss/v2/table"
 )
 
 // Common style definitions
