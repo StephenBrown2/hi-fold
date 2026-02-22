@@ -6,6 +6,7 @@ require (
 	charm.land/fang/v2 v2.0.0-20251110204320-f80f0990c76f
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20260212100304-e18737634dea
 	github.com/Rhymond/go-money v1.0.15
+	github.com/jszwec/csvutil v1.10.0
 	github.com/matryer/is v1.4.1
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"charm.land/fang/v2"
 	"github.com/Rhymond/go-money"
@@ -135,21 +136,54 @@ func runHIFO(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Parse and merge CSV files
-	transactions, err := parseAndMergeCSVs(expandedFiles)
+	// Parse CSV files grouped by detected format
+	transactionsByFormat, filesByFormat, err := parseAndMergeCSVsByFormat(expandedFiles)
 	if err != nil {
 		log.Fatalf("Error parsing CSV files: %v", err)
 	}
 
-	fmt.Printf("Loaded %d unique transactions from %d file(s)\n", len(transactions), len(expandedFiles))
-
-	if targetYear != 0 {
-		// Single year mode - use cache if available
-		processSingleYear(targetYear, transactions, priceAPI, cache, expandedFiles)
-	} else {
-		// Multi-year mode - process all years with sales
-		processAllYears(transactions, priceAPI, cache, expandedFiles)
+	totalTransactions := 0
+	for _, transactions := range transactionsByFormat {
+		totalTransactions += len(transactions)
 	}
+
+	fmt.Printf("Loaded %d unique transactions across %d format(s) from %d file(s)\n", totalTransactions, len(transactionsByFormat), len(expandedFiles))
+
+	if len(transactionsByFormat) == 1 {
+		for format, transactions := range transactionsByFormat {
+			formatLabel := formatOutputLabel(format)
+			formatFiles := filesByFormat[format]
+			if targetYear != 0 {
+				processSingleYear(targetYear, transactions, priceAPI, cache, formatFiles, formatLabel, outputFile)
+			} else {
+				processAllYears(transactions, priceAPI, cache, formatFiles, formatLabel)
+			}
+		}
+		return
+	}
+
+	if outputFile != "" {
+		fmt.Println("Warning: --output is ignored when mixed formats are provided; writing one output per format/year")
+	}
+
+	for _, format := range slices.Sorted(maps.Keys(transactionsByFormat)) {
+		transactions := transactionsByFormat[format]
+		formatLabel := formatOutputLabel(format)
+		formatFiles := filesByFormat[format]
+
+		fmt.Printf("\n%s\n", "==================================================================================")
+		fmt.Printf("Processing %s transactions (%d file(s), %d unique transaction(s))\n", format, len(formatFiles), len(transactions))
+
+		if targetYear != 0 {
+			processSingleYear(targetYear, transactions, priceAPI, cache, formatFiles, formatLabel, "")
+		} else {
+			processAllYears(transactions, priceAPI, cache, formatFiles, formatLabel)
+		}
+	}
+}
+
+func formatOutputLabel(format CSVFormat) string {
+	return strings.ToLower(format.String())
 }
 
 func showCacheInformation(cache *Cache, inputFiles []string) {
@@ -161,7 +195,7 @@ func showCacheInformation(cache *Cache, inputFiles []string) {
 	fmt.Println("Use --invalidate-cache to clear cached data")
 }
 
-func processSingleYear(year int, transactions []Transaction, priceAPI PriceAPI, cache *Cache, inputFiles []string) {
+func processSingleYear(year int, transactions []Transaction, priceAPI PriceAPI, cache *Cache, inputFiles []string, formatLabel string, explicitOutputFile string) {
 	if invalidateCache {
 		if err := cache.invalidateCache(year, inputFiles); err != nil {
 			log.Printf("Warning: Failed to invalidate cache: %v", err)
@@ -177,18 +211,19 @@ func processSingleYear(year int, transactions []Transaction, priceAPI PriceAPI, 
 	displayResults(lots, sales, transactions, year, priceAPI)
 
 	// Generate tax records CSV
-	if outputFile == "" {
-		outputFile = fmt.Sprintf("tax-records-%d.csv", year)
+	outputPath := explicitOutputFile
+	if outputPath == "" {
+		outputPath = filepath.Join(outputDir, fmt.Sprintf("%s-form-8949-tax-year-%d.csv", formatLabel, year))
 	}
 
-	if err := generateTaxRecords(sales, outputFile); err != nil {
+	if err := generateTaxRecords(sales, outputPath); err != nil {
 		log.Fatalf("Error generating tax records: %v", err)
 	}
 
-	fmt.Printf("\nTax records saved to: %s\n", outputFile)
+	fmt.Printf("\nTax records saved to: %s\n", outputPath)
 }
 
-func processAllYears(transactions []Transaction, priceAPI PriceAPI, cache *Cache, inputFiles []string) {
+func processAllYears(transactions []Transaction, priceAPI PriceAPI, cache *Cache, inputFiles []string, formatLabel string) {
 	// Find all years with sales
 	salesByYear := make(map[int][]Sale)
 
@@ -210,7 +245,7 @@ func processAllYears(transactions []Transaction, priceAPI PriceAPI, cache *Cache
 		displayResults(result.Lots, result.Sales, transactions, year, priceAPI)
 
 		// Generate CSV for this year
-		outputFile := filepath.Join(outputDir, fmt.Sprintf("tax-records-%d.csv", year))
+		outputFile := filepath.Join(outputDir, fmt.Sprintf("%s-form-8949-tax-year-%d.csv", formatLabel, year))
 		if err := generateTaxRecords(result.Sales, outputFile); err != nil {
 			log.Printf("Error generating tax records for %d: %v", year, err)
 		} else {

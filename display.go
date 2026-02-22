@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/Rhymond/go-money"
 )
@@ -103,7 +104,7 @@ func displayResults(lots []Lot, sales []Sale, transactions []Transaction, year i
 		displaySalesTable("Long-Term Sales Details (>1 Year Holding Period)", longTermSales)
 	}
 
-	displayHoldings(lots, priceAPI)
+	displayHoldings(lots, transactions, year, priceAPI)
 }
 
 // displaySalesTable shows a table of sales with summary totals
@@ -157,7 +158,7 @@ func displaySalesTable(title string, sales []Sale) {
 }
 
 // displayHoldings shows the remaining BTC holdings
-func displayHoldings(lots []Lot, priceAPI PriceAPI) {
+func displayHoldings(lots []Lot, transactions []Transaction, year int, priceAPI PriceAPI) {
 	// Remaining lots
 	remainingLots := []Lot{}
 	for _, lot := range lots {
@@ -223,6 +224,29 @@ func displayHoldings(lots []Lot, priceAPI PriceAPI) {
 			Headers("Holdings Summary", "Value")
 
 		summaryTable.Row("Net BTC Position", totalRemainingBTC.Display())
+
+		// Change in position within the selected tax year
+		startOfYear := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+		endOfYear := time.Date(year, time.December, 31, 23, 59, 59, 999999999, time.UTC)
+		openingBalance := money.New(0, "BTC")
+		closingBalance := money.New(0, "BTC")
+		for _, tx := range transactions {
+			if tx.Date.Before(startOfYear) {
+				openingBalance, _ = openingBalance.Add(tx.AmountBTC)
+			}
+			if !tx.Date.After(endOfYear) {
+				closingBalance, _ = closingBalance.Add(tx.AmountBTC)
+			}
+		}
+		changeInPosition, _ := closingBalance.Subtract(openingBalance)
+		yearLabel := fmt.Sprintf("%d Position Δ", year)
+		if changeInPosition.IsPositive() {
+			summaryTable.Row(yearLabel, fmt.Sprintf("+%s", changeInPosition.Display()))
+		} else if changeInPosition.IsNegative() {
+			summaryTable.Row(yearLabel, fmt.Sprintf("%s", changeInPosition.Display()))
+		} else {
+			summaryTable.Row(yearLabel, changeInPosition.Display())
+		}
 
 		if !totalRemainingBTC.IsZero() {
 			// Calculate average cost basis: total cost ÷ total BTC

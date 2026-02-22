@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/matryer/is"
 )
@@ -64,25 +65,28 @@ func TestParseCSV(t *testing.T) {
 	})
 }
 
-func TestParseTransaction(t *testing.T) {
+func TestFoldToTransaction(t *testing.T) {
 	is := is.New(t)
 
 	t.Run("valid purchase transaction", func(t *testing.T) {
-		record := []string{
-			"txn-001",
-			"2024-01-01 10:00:00.000000+00:00",
-			"Purchase",
-			"Test Purchase",
-			"BTC",
-			"1.00000000",
-			"40000.00",
-			"-40000.00",
-			"0.00",
-			"-40000.00",
-			"",
+		parsedDate, err := time.Parse(foldDateTimeLayout, "2024-01-01 10:00:00.000000+00:00")
+		is.NoErr(err)
+
+		fold := Fold{
+			ReferenceID:     "txn-001",
+			Date:            foldDate{Time: parsedDate},
+			TransactionType: "Purchase",
+			Description:     "Test Purchase",
+			Asset:           "BTC",
+			AmountBTC:       "1.00000000",
+			PricePerCoin:    "40000.00",
+			SubtotalUSD:     "-40000.00",
+			FeeUSD:          "0.00",
+			TotalUSD:        "-40000.00",
+			TransactionID:   "",
 		}
 
-		tx, err := parseTransaction(record)
+		tx, err := fold.ToTransaction()
 		is.NoErr(err)
 		is.Equal(tx.ReferenceID, "txn-001")
 		is.Equal(tx.TransactionType, "Purchase")
@@ -94,21 +98,24 @@ func TestParseTransaction(t *testing.T) {
 	})
 
 	t.Run("deposit transaction with empty price fields", func(t *testing.T) {
-		record := []string{
-			"txn-deposit",
-			"2024-01-01 10:00:00.000000+00:00",
-			"Deposit",
-			"External Deposit",
-			"BTC",
-			"0.50000000",
-			"", // Empty price per coin
-			"", // Empty subtotal
-			"", // Empty fee
-			"", // Empty total
-			"abc123",
+		parsedDate, err := time.Parse(foldDateTimeLayout, "2024-01-01 10:00:00.000000+00:00")
+		is.NoErr(err)
+
+		fold := Fold{
+			ReferenceID:     "txn-deposit",
+			Date:            foldDate{Time: parsedDate},
+			TransactionType: "Deposit",
+			Description:     "External Deposit",
+			Asset:           "BTC",
+			AmountBTC:       "0.50000000",
+			PricePerCoin:    "",
+			SubtotalUSD:     "",
+			FeeUSD:          "",
+			TotalUSD:        "",
+			TransactionID:   "abc123",
 		}
 
-		tx, err := parseTransaction(record)
+		tx, err := fold.ToTransaction()
 		is.NoErr(err)
 		is.Equal(tx.TransactionType, "Deposit")
 		is.Equal(tx.AmountBTC.Amount(), int64(50000000)) // 0.5 BTC in satoshis
@@ -118,59 +125,51 @@ func TestParseTransaction(t *testing.T) {
 	})
 
 	t.Run("invalid date format", func(t *testing.T) {
-		record := []string{
-			"txn-bad",
-			"invalid-date",
-			"Purchase",
-			"Test",
-			"BTC",
-			"1.0",
-			"40000.00",
-			"-40000.00",
-			"0.00",
-			"-40000.00",
-			"",
-		}
-
-		_, err := parseTransaction(record)
+		_, err := time.Parse(foldDateTimeLayout, "invalid-date")
 		is.True(err != nil)
 	})
 
 	t.Run("invalid BTC amount", func(t *testing.T) {
-		record := []string{
-			"txn-bad",
-			"2024-01-01 10:00:00.000000+00:00",
-			"Purchase",
-			"Test",
-			"BTC",
-			"not-a-number",
-			"40000.00",
-			"-40000.00",
-			"0.00",
-			"-40000.00",
-			"",
+		parsedDate, err := time.Parse(foldDateTimeLayout, "2024-01-01 10:00:00.000000+00:00")
+		is.NoErr(err)
+
+		fold := Fold{
+			ReferenceID:     "txn-bad",
+			Date:            foldDate{Time: parsedDate},
+			TransactionType: "Purchase",
+			Description:     "Test",
+			Asset:           "BTC",
+			AmountBTC:       "not-a-number",
+			PricePerCoin:    "40000.00",
+			SubtotalUSD:     "-40000.00",
+			FeeUSD:          "0.00",
+			TotalUSD:        "-40000.00",
+			TransactionID:   "",
 		}
 
-		_, err := parseTransaction(record)
+		_, err = fold.ToTransaction()
 		is.True(err != nil)
 	})
 
 	t.Run("invalid price per coin", func(t *testing.T) {
-		record := []string{
-			"txn-bad",
-			"2024-01-01 10:00:00.000000+00:00",
-			"Purchase",
-			"Test",
-			"BTC",
-			"1.0",
-			"not-a-number",
-			"-40000.00",
-			"0.00",
-			"-40000.00",
-			"",
+		parsedDate, err := time.Parse(foldDateTimeLayout, "2024-01-01 10:00:00.000000+00:00")
+		is.NoErr(err)
+
+		fold := Fold{
+			ReferenceID:     "txn-bad",
+			Date:            foldDate{Time: parsedDate},
+			TransactionType: "Purchase",
+			Description:     "Test",
+			Asset:           "BTC",
+			AmountBTC:       "1.0",
+			PricePerCoin:    "not-a-number",
+			SubtotalUSD:     "-40000.00",
+			FeeUSD:          "0.00",
+			TotalUSD:        "-40000.00",
+			TransactionID:   "",
 		}
 
-		_, err := parseTransaction(record)
+		_, err = fold.ToTransaction()
 		is.True(err != nil)
 	})
 }
@@ -266,21 +265,24 @@ func TestCSVParsingEdgeCases(t *testing.T) {
 		}
 
 		for _, dateStr := range testDates {
-			record := []string{
-				"test-id",
-				dateStr,
-				"Purchase",
-				"Test",
-				"BTC",
-				"1.0",
-				"40000.00",
-				"-40000.00",
-				"0.00",
-				"-40000.00",
-				"",
+			parsedDate, err := time.Parse(foldDateTimeLayout, dateStr)
+			is.NoErr(err)
+
+			fold := Fold{
+				ReferenceID:     "test-id",
+				Date:            foldDate{Time: parsedDate},
+				TransactionType: "Purchase",
+				Description:     "Test",
+				Asset:           "BTC",
+				AmountBTC:       "1.0",
+				PricePerCoin:    "40000.00",
+				SubtotalUSD:     "-40000.00",
+				FeeUSD:          "0.00",
+				TotalUSD:        "-40000.00",
+				TransactionID:   "",
 			}
 
-			tx, err := parseTransaction(record)
+			tx, err := fold.ToTransaction()
 			is.NoErr(err)
 			is.True(!tx.Date.IsZero())
 		}
@@ -297,43 +299,48 @@ func TestCSVParsingEdgeCases(t *testing.T) {
 		}
 
 		for _, amountStr := range testAmounts {
-			record := []string{
-				"test-id",
-				"2024-01-01 10:00:00.000000+00:00",
-				"Purchase",
-				"Test",
-				"BTC",
-				amountStr,
-				"40000.00",
-				"-40000.00",
-				"0.00",
-				"-40000.00",
-				"",
+			parsedDate, err := time.Parse(foldDateTimeLayout, "2024-01-01 10:00:00.000000+00:00")
+			is.NoErr(err)
+
+			fold := Fold{
+				ReferenceID:     "test-id",
+				Date:            foldDate{Time: parsedDate},
+				TransactionType: "Purchase",
+				Description:     "Test",
+				Asset:           "BTC",
+				AmountBTC:       amountStr,
+				PricePerCoin:    "40000.00",
+				SubtotalUSD:     "-40000.00",
+				FeeUSD:          "0.00",
+				TotalUSD:        "-40000.00",
+				TransactionID:   "",
 			}
 
-			tx, err := parseTransaction(record)
+			tx, err := fold.ToTransaction()
 			is.NoErr(err)
 			is.True(tx.AmountBTC.Amount() > 0)
 		}
 	})
 
 	t.Run("large USD amounts", func(t *testing.T) {
-		// Test handling of large USD amounts
-		record := []string{
-			"test-id",
-			"2024-01-01 10:00:00.000000+00:00",
-			"Purchase",
-			"Test",
-			"BTC",
-			"1.0",
-			"100000.00", // $100k per BTC
-			"-100000.00",
-			"100.00", // $100 fee
-			"-100100.00",
-			"", // Transaction ID
+		parsedDate, err := time.Parse(foldDateTimeLayout, "2024-01-01 10:00:00.000000+00:00")
+		is.NoErr(err)
+
+		fold := Fold{
+			ReferenceID:     "test-id",
+			Date:            foldDate{Time: parsedDate},
+			TransactionType: "Purchase",
+			Description:     "Test",
+			Asset:           "BTC",
+			AmountBTC:       "1.0",
+			PricePerCoin:    "100000.00",
+			SubtotalUSD:     "-100000.00",
+			FeeUSD:          "100.00",
+			TotalUSD:        "-100100.00",
+			TransactionID:   "",
 		}
 
-		tx, err := parseTransaction(record)
+		tx, err := fold.ToTransaction()
 		is.NoErr(err)
 		is.Equal(tx.PricePerCoin.Amount(), int64(10000000)) // $100k in cents
 		is.Equal(tx.FeeUSD.Amount(), int64(10000))          // $100 in cents

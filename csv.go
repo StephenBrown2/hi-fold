@@ -2,17 +2,135 @@ package main
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/Rhymond/go-money"
+	"github.com/jszwec/csvutil"
 )
 
+// CSVFormat identifies the format of the CSV file
+type CSVFormat int
+
+const (
+	CSVFormatUnknown     CSVFormat = iota
+	CSVFormatFold                  // Fold format (current default)
+	CSVFormatRiver                 // River format
+	CSVFormatKoinly                // Koinly format
+	CSVFormatCoinTracker           // CoinTracker format
+	CSVFormatCoinLedger            // CoinLedger format
+	CSVFormatStrike                // Strike format
+)
+
+func (f CSVFormat) String() string {
+	switch f {
+	case CSVFormatFold:
+		return "Fold"
+	case CSVFormatRiver:
+		return "River"
+	case CSVFormatKoinly:
+		return "Koinly"
+	case CSVFormatCoinTracker:
+		return "CoinTracker"
+	case CSVFormatCoinLedger:
+		return "CoinLedger"
+	case CSVFormatStrike:
+		return "Strike"
+	default:
+		return "Unknown"
+	}
+}
+
 func parseCSV(filename string) ([]Transaction, error) {
+	format, transactions, err := detectCSVFormat(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("Detected CSV format: %s\n", format)
+
+	return transactions, nil
+}
+
+func detectCSVFormat(filename string) (CSVFormat, []Transaction, error) {
+	type parserAttempt struct {
+		format          CSVFormat
+		requiredHeaders []string
+		parse           func(string, []string) ([]Transaction, error)
+	}
+
+	attempts := []parserAttempt{
+		{
+			format:          CSVFormatFold,
+			requiredHeaders: []string{"referenceid", "dateutc", "transactiontype", "amountbtc"},
+			parse: func(path string, headers []string) ([]Transaction, error) {
+				return parseModelCSV[Fold](path, headers)
+			},
+		},
+		{
+			format:          CSVFormatStrike,
+			requiredHeaders: []string{"transactionid", "timeutc", "status", "transactiontype", "amountbtc", "amountusd"},
+			parse: func(path string, headers []string) ([]Transaction, error) {
+				return parseModelCSV[Strike](path, headers)
+			},
+		},
+		{
+			format:          CSVFormatRiver,
+			requiredHeaders: []string{"date", "sentamount", "sentcurrency", "receivedamount", "receivedcurrency", "feeamount", "feecurrency", "tag"},
+			parse: func(path string, headers []string) ([]Transaction, error) {
+				return parseModelCSV[River](path, headers)
+			},
+		},
+		{
+			format:          CSVFormatKoinly,
+			requiredHeaders: []string{"date", "sentamount", "sentcurrency", "receivedamount", "receivedcurrency", "feeamount", "feecurrency", "label"},
+			parse: func(path string, headers []string) ([]Transaction, error) {
+				return parseModelCSV[Koinly](path, headers)
+			},
+		},
+		{
+			format:          CSVFormatCoinTracker,
+			requiredHeaders: []string{"date", "receivedquantity", "receivedcurrency", "sentquantity", "sentcurrency", "feeamount", "feecurrency", "tag"},
+			parse: func(path string, headers []string) ([]Transaction, error) {
+				return parseModelCSV[CoinTracker](path, headers)
+			},
+		},
+		{
+			format:          CSVFormatCoinLedger,
+			requiredHeaders: []string{"dateutc", "assetsent", "amountsent", "assetreceived", "amountreceived", "type"},
+			parse: func(path string, headers []string) ([]Transaction, error) {
+				return parseModelCSV[CoinLedger](path, headers)
+			},
+		},
+	}
+
+	for _, attempt := range attempts {
+		transactions, err := attempt.parse(filename, attempt.requiredHeaders)
+		if err == nil {
+			return attempt.format, transactions, nil
+		}
+	}
+
+	return CSVFormatUnknown, nil, fmt.Errorf("unable to detect CSV format; supported formats: Fold, Strike, River, Koinly, CoinTracker, CoinLedger")
+}
+
+type transactionModel interface {
+	ToTransaction() (Transaction, error)
+}
+
+func parseModelCSV[T transactionModel](filename string, requiredHeaders []string) ([]Transaction, error) {
+	headerRowIndex, err := findHeaderRowIndexInFile(filename, requiredHeaders)
+	if err != nil {
+		return nil, err
+	}
+	if headerRowIndex == -1 {
+		return nil, fmt.Errorf("required headers not found")
+	}
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -20,77 +138,109 @@ func parseCSV(filename string) ([]Transaction, error) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1 // Allow variable number of fields
-	records, err := reader.ReadAll()
+	reader.FieldsPerRecord = -1
+
+	for i := 0; i < headerRowIndex; i++ {
+		if _, err := reader.Read(); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("required headers not found")
+			}
+			return nil, err
+		}
+	}
+
+	decoder, err := csvutil.NewDecoder(reader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to build decoder: %w", err)
 	}
 
-	var transactions []Transaction
-
-	// Skip header rows and account info (first 4 rows)
-	// Find the transaction header row
-	headerRowIndex := -1
-	for i, record := range records {
-		if len(record) > 0 && record[0] == "Reference ID" {
-			headerRowIndex = i
-			break
-		}
-	}
-
-	if headerRowIndex == -1 {
-		return nil, fmt.Errorf("could not find transaction header row")
-	}
-
-	// Parse transaction rows
-	for i := headerRowIndex + 1; i < len(records); i++ {
-		record := records[i]
-		if len(record) < 11 || record[0] == "" || len(record) == 1 {
-			continue // Skip empty rows, footer, or incomplete rows
-		}
-
-		transaction, err := parseTransaction(record)
-		if err != nil {
-			fmt.Printf("Warning: skipping invalid transaction at row %d: %v\n", i+1, err)
+	transactions := make([]Transaction, 0)
+	rowNumber := headerRowIndex + 2
+	for {
+		var record T
+		if err := decoder.Decode(&record); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			fmt.Printf("Warning: skipping invalid CSV row %d: %v\n", rowNumber, err)
+			rowNumber++
 			continue
 		}
 
-		transactions = append(transactions, transaction)
+		tx, err := record.ToTransaction()
+		if err != nil {
+			if errors.Is(err, errSkipTransaction) {
+				rowNumber++
+				continue
+			}
+			fmt.Printf("Warning: skipping invalid transaction at row %d: %v\n", rowNumber, err)
+			rowNumber++
+			continue
+		}
+		transactions = append(transactions, tx)
+		rowNumber++
 	}
 
 	return transactions, nil
 }
 
-// parseAndMergeCSVs parses multiple CSV files and merges them, deduplicating by Reference ID
-func parseAndMergeCSVs(filenames []string) ([]Transaction, error) {
-	transactionMap := make(map[string]Transaction) // Use Reference ID as key for deduplication
+func findHeaderRowIndexInFile(filename string, requiredHeaders []string) (int, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return -1, err
+	}
+	defer file.Close()
 
-	for i, filename := range filenames {
-		fmt.Printf("Processing file %d/%d: %s\n", i+1, len(filenames), filename)
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
 
-		transactions, err := parseCSV(filename)
+	for i := 0; ; i++ {
+		row, err := reader.Read()
 		if err != nil {
-			return nil, fmt.Errorf("error parsing file %s: %w", filename, err)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return -1, err
 		}
 
-		// Add transactions to map, deduplicating by Reference ID
-		duplicateCount := 0
-		for _, tx := range transactions {
-			if _, exists := transactionMap[tx.ReferenceID]; exists {
-				duplicateCount++
-				fmt.Printf("  Duplicate transaction found (Reference ID: %s), keeping first occurrence\n", tx.ReferenceID)
-			} else {
-				transactionMap[tx.ReferenceID] = tx
+		headerSet := make(map[string]struct{}, len(row))
+		for _, col := range row {
+			headerSet[canonicalHeader(col)] = struct{}{}
+		}
+
+		allPresent := true
+		for _, required := range requiredHeaders {
+			if _, ok := headerSet[required]; !ok {
+				allPresent = false
+				break
 			}
 		}
 
-		fmt.Printf("  Loaded %d transactions (%d duplicates skipped)\n", len(transactions)-duplicateCount, duplicateCount)
+		if allPresent {
+			return i, nil
+		}
+	}
+
+	return -1, nil
+}
+
+func canonicalHeader(value string) string {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	replacer := strings.NewReplacer("\"", "", " ", "", "_", "", "-", "", "(", "", ")", "", ".", "", "/", "")
+	return replacer.Replace(normalized)
+}
+
+// parseAndMergeCSVs parses multiple CSV files and merges them, deduplicating by Reference ID
+func parseAndMergeCSVs(filenames []string) ([]Transaction, error) {
+	groupedTransactions, _, err := parseAndMergeCSVsByFormat(filenames)
+	if err != nil {
+		return nil, err
 	}
 
 	// Convert map back to slice
 	var allTransactions []Transaction
-	for _, tx := range transactionMap {
-		allTransactions = append(allTransactions, tx)
+	for _, format := range slices.Sorted(maps.Keys(groupedTransactions)) {
+		allTransactions = append(allTransactions, groupedTransactions[format]...)
 	}
 
 	// Sort chronologically by date, with ReferenceID as tie-breaker for deterministic ordering
@@ -105,73 +255,58 @@ func parseAndMergeCSVs(filenames []string) ([]Transaction, error) {
 	return allTransactions, nil
 }
 
-func parseTransaction(record []string) (Transaction, error) {
-	// Parse date
-	dateStr := record[1]
-	date, err := time.Parse("2006-01-02 15:04:05.999999-07:00", dateStr)
-	if err != nil {
-		return Transaction{}, fmt.Errorf("invalid date format: %s", dateStr)
-	}
+// parseAndMergeCSVsByFormat parses CSV files, groups by detected format, and deduplicates by Reference ID within each format.
+func parseAndMergeCSVsByFormat(filenames []string) (map[CSVFormat][]Transaction, map[CSVFormat][]string, error) {
+	groupedTransactionMap := make(map[CSVFormat]map[string]Transaction)
+	groupedFiles := make(map[CSVFormat][]string)
 
-	// Parse BTC amount
-	amountBTC, err := newBTCFromString(record[5])
-	if err != nil {
-		return Transaction{}, fmt.Errorf("invalid BTC amount: %s", record[5])
-	}
+	for i, filename := range filenames {
+		fmt.Printf("Processing file %d/%d: %s\n", i+1, len(filenames), filename)
 
-	// Parse price per coin (may be empty for deposits)
-	pricePerCoin := money.New(0, money.USD)
-	if record[6] != "" {
-		pricePerCoinFloat, err := strconv.ParseFloat(record[6], 64)
+		format, transactions, err := detectCSVFormat(filename)
 		if err != nil {
-			return Transaction{}, fmt.Errorf("invalid price per coin: %s", record[6])
+			return nil, nil, fmt.Errorf("error parsing file %s: %w", filename, err)
 		}
-		pricePerCoin = money.NewFromFloat(pricePerCoinFloat, money.USD)
+
+		fmt.Printf("Detected CSV format: %s\n", format)
+
+		if _, exists := groupedTransactionMap[format]; !exists {
+			groupedTransactionMap[format] = make(map[string]Transaction)
+		}
+
+		groupedFiles[format] = append(groupedFiles[format], filename)
+
+		duplicateCount := 0
+		for _, tx := range transactions {
+			if _, exists := groupedTransactionMap[format][tx.ReferenceID]; exists {
+				duplicateCount++
+				fmt.Printf("  Duplicate %s transaction found (Reference ID: %s), keeping first occurrence\n", format, tx.ReferenceID)
+			} else {
+				groupedTransactionMap[format][tx.ReferenceID] = tx
+			}
+		}
+
+		fmt.Printf("  Loaded %d %s transactions (%d duplicates skipped)\n", len(transactions)-duplicateCount, format, duplicateCount)
 	}
 
-	// Parse subtotal USD
-	subtotalUSD := money.New(0, money.USD)
-	if record[7] != "" {
-		subtotalUSDFloat, err := strconv.ParseFloat(record[7], 64)
-		if err != nil {
-			return Transaction{}, fmt.Errorf("invalid subtotal USD: %s", record[7])
+	groupedTransactions := make(map[CSVFormat][]Transaction, len(groupedTransactionMap))
+	for format, txMap := range groupedTransactionMap {
+		transactions := make([]Transaction, 0, len(txMap))
+		for _, tx := range txMap {
+			transactions = append(transactions, tx)
 		}
-		subtotalUSD = money.NewFromFloat(subtotalUSDFloat, money.USD)
+
+		slices.SortStableFunc(transactions, func(a, b Transaction) int {
+			if cmp := a.Date.Compare(b.Date); cmp != 0 {
+				return cmp
+			}
+			return strings.Compare(a.ReferenceID, b.ReferenceID)
+		})
+
+		groupedTransactions[format] = transactions
 	}
 
-	// Parse fee USD
-	feeUSD := money.New(0, money.USD)
-	if record[8] != "" {
-		feeUSDFloat, err := strconv.ParseFloat(record[8], 64)
-		if err != nil {
-			return Transaction{}, fmt.Errorf("invalid fee USD: %s", record[8])
-		}
-		feeUSD = money.NewFromFloat(feeUSDFloat, money.USD)
-	}
-
-	// Parse total USD
-	totalUSD := money.New(0, money.USD)
-	if record[9] != "" {
-		totalUSDFloat, err := strconv.ParseFloat(record[9], 64)
-		if err != nil {
-			return Transaction{}, fmt.Errorf("invalid total USD: %s", record[9])
-		}
-		totalUSD = money.NewFromFloat(totalUSDFloat, money.USD)
-	}
-
-	return Transaction{
-		ReferenceID:     record[0],
-		Date:            date,
-		TransactionType: record[2],
-		Description:     record[3],
-		Asset:           record[4],
-		AmountBTC:       amountBTC,
-		PricePerCoin:    pricePerCoin,
-		SubtotalUSD:     subtotalUSD,
-		FeeUSD:          feeUSD,
-		TotalUSD:        totalUSD,
-		TransactionID:   record[10],
-	}, nil
+	return groupedTransactions, groupedFiles, nil
 }
 
 // generateTaxRecords creates a CSV file with tax records for IRS Form 8949
@@ -229,6 +364,15 @@ func generateTaxRecords(sales []Sale, filename string) error {
 	}
 
 	// Write headers
+	boxHeaders := []string{
+		"Box 1(a)",
+		"Box 1(b)",
+		"Box 1(c)",
+		"Box 1(d)",
+		"Box 1(e)",
+		"Box 1(h)",
+	}
+
 	headers := []string{
 		"Description",
 		"Date Acquired",
@@ -238,12 +382,32 @@ func generateTaxRecords(sales []Sale, filename string) error {
 		"Gain/Loss",
 	}
 
+	boxTotals := []string{
+		"",
+		"",
+		"",
+		"Box 2(d)",
+		"Box 2(e)",
+		"Box 2(h)",
+	}
+	totalsHeaders := []string{
+		"",
+		"",
+		"",
+		"Total Proceeds",
+		"Total Cost Basis",
+		"Total Gain/Loss",
+	}
+
 	// Write Short-Term Capital Gains section
 	if len(shortTermRecords) > 0 {
 		if err := writer.Write([]string{"SHORT-TERM CAPITAL GAINS AND LOSSES (Form 8949 Part I)"}); err != nil {
 			return err
 		}
 		if err := writer.Write([]string{}); err != nil { // Empty line
+			return err
+		}
+		if err := writer.Write(boxHeaders); err != nil {
 			return err
 		}
 		if err := writer.Write(headers); err != nil {
@@ -256,9 +420,18 @@ func generateTaxRecords(sales []Sale, filename string) error {
 			}
 		}
 
+		// Add totals box row
+		if err := writer.Write(boxTotals); err != nil {
+			return err
+		}
+		// Add totals box headers
+		if err := writer.Write(totalsHeaders); err != nil {
+			return err
+		}
+
 		// Add totals row
 		totalsRow := []string{
-			"TOTALS:",
+			"",
 			"",
 			"",
 			fmt.Sprintf("%.2f", shortTermProceeds),
@@ -286,6 +459,9 @@ func generateTaxRecords(sales []Sale, filename string) error {
 		if err := writer.Write([]string{}); err != nil { // Empty line
 			return err
 		}
+		if err := writer.Write(boxHeaders); err != nil {
+			return err
+		}
 		if err := writer.Write(headers); err != nil {
 			return err
 		}
@@ -296,9 +472,18 @@ func generateTaxRecords(sales []Sale, filename string) error {
 			}
 		}
 
+		// Add totals box row
+		if err := writer.Write(boxTotals); err != nil {
+			return err
+		}
+		// Add totals box headers
+		if err := writer.Write(totalsHeaders); err != nil {
+			return err
+		}
+
 		// Add totals row
 		totalsRow := []string{
-			"TOTALS:",
+			"",
 			"",
 			"",
 			fmt.Sprintf("%.2f", longTermProceeds),

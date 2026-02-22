@@ -11,26 +11,36 @@ import (
 	"github.com/matryer/is"
 )
 
-// FuzzParseTransaction tests parseTransaction with randomly generated CSV rows
-func FuzzParseTransaction(f *testing.F) {
-	// Seed with some valid transaction examples
-	f.Add("2024-01-15T10:30:00Z", "Purchase", "0.1", "40000", "4000", "", "", "", "", "", "txn-001")
-	f.Add("2023-12-01T00:00:00Z", "Sale", "0.05", "50000", "2500", "100", "2600", "", "", "", "txn-002")
-	f.Add("2024-06-01T12:00:00Z", "Deposit", "1.0", "", "", "", "", "", "", "", "txn-003")
-	f.Add("", "", "", "", "", "", "", "", "", "", "") // Empty record
+// FuzzFoldToTransaction tests Fold.ToTransaction with randomized inputs
+func FuzzFoldToTransaction(f *testing.F) {
+	f.Add("txn-001", "2024-01-15 10:30:00.000000+00:00", "Purchase", "BTC", "0.10000000", "40000", "-4000", "0", "-4000")
+	f.Add("txn-002", "2023-12-01 00:00:00.000000+00:00", "Sale", "BTC", "-0.05000000", "50000", "2500", "100", "2600")
+	f.Add("txn-003", "2024-06-01 12:00:00.000000+00:00", "Deposit", "BTC", "1.00000000", "", "", "", "")
+	f.Add("", "", "", "", "", "", "", "", "")
 
-	f.Fuzz(func(t *testing.T, date, txType, amount, price, subtotal, fee, total, notes1, notes2, notes3, refID string) {
+	f.Fuzz(func(t *testing.T, refID, date, txType, asset, amount, price, subtotal, fee, total string) {
 		is := is.New(t)
 
-		// Create CSV record array
-		record := []string{date, txType, amount, price, subtotal, fee, total, notes1, notes2, notes3, refID}
-
-		// Ensure we have the expected 11 fields
-		if len(record) != 11 {
+		parsedDate, err := time.Parse(foldDateTimeLayout, date)
+		if err != nil {
 			return
 		}
 
-		transaction, err := parseTransaction(record)
+		fold := Fold{
+			ReferenceID:     refID,
+			Date:            foldDate{Time: parsedDate},
+			TransactionType: txType,
+			Description:     "fuzz",
+			Asset:           asset,
+			AmountBTC:       amount,
+			PricePerCoin:    price,
+			SubtotalUSD:     subtotal,
+			FeeUSD:          fee,
+			TotalUSD:        total,
+			TransactionID:   refID,
+		}
+
+		transaction, err := fold.ToTransaction()
 		if err != nil {
 			// Error is acceptable for invalid input
 			return
